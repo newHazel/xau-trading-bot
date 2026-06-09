@@ -1,0 +1,15 @@
+checks:
+  - "data_freshness"
+  - "db_writable"
+  - "telegram_responsive"
+  - "news_calendar_loaded"
+  - "memory_usage_ok"
+  - "no_repeated_errors_in_last_hour"
+heartbeat:
+  enabled: true
+  interval_minutes: 60
+  send_to_telegram: true
+alerts_on_failure:
+  send_to_telegram: true
+  retry_count: 3
+  retry_delay_seconds: 30

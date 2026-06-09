@@ -1,0 +1,13 @@
+primary: "oanda"
+fallback_1: "bybit"
+fallback_2: "yfinance"
+failover_threshold_seconds: 30
+alert_on_failover: true
+data_freshness_max_seconds: 120
+correlation_spike:
+  enabled: true
+  pair: "DXY"
+  expected_correlation: -0.7
+  lookback_minutes: 30
+  break_threshold: 0.3
+  action_on_break: "degraded_mode"

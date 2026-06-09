@@ -1,0 +1,4 @@
+event_time,currency,impact,tier,title,actual,forecast,previous
+2026-05-06T18:00:00Z,USD,HIGH,1,FOMC Meeting Minutes,,,
+2026-05-09T12:30:00Z,USD,HIGH,2,CPI m/m,,,
+2026-06-03T12:30:00Z,USD,HIGH,1,NFP,,,

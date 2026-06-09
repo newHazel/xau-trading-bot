@@ -1,0 +1,10 @@
+cooldown_minutes_after_signal: 60
+setup_expiry_minutes: 90
+setup_expiry_starts_from: "fvg_creation"  # fvg_creation / sweep / zone_arrival
+max_active_setups_per_symbol: 1
+prevent_duplicate_zone_signals: true
+lock_day_after_tp: true
+lock_day_after_max_losses: true
+signal_spacing:
+  min_minutes_between_signals_same_direction: 30
+  min_atr_distance_between_entries: 1.0

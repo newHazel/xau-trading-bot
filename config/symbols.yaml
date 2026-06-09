@@ -1,0 +1,8 @@
+primary_symbol: "XAUUSD"
+alternative_symbols:
+  - "XAUUSDT"
+  - "GC=F"
+dxy_symbol: "DXY"
+correlation_pairs:
+  - "DXY"
+  - "US10Y"

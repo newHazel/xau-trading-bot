@@ -1,0 +1,41 @@
+# Core
+pandas>=2.0.0
+numpy>=1.24.0
+pyaml>=23.0.0
+python-dotenv>=1.0.0
+
+# Data Sources
+oandapyV20>=0.7.0
+pybit>=5.0.0
+yfinance>=0.2.0
+
+# Database
+# SQLite is built-in to Python — no extra package needed
+
+# Timezone / DST
+pytz>=2023.3
+tzdata>=2023.3
+
+# Telegram
+python-telegram-bot>=20.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Dashboard (Phase 10 — optional)
+streamlit>=1.28.0
+plotly>=5.17.0
+
+# Web chart (standalone FastAPI + TradingView Lightweight Charts)
+fastapi>=0.110.0
+uvicorn>=0.27.0
+
+# Backtesting utilities
+tqdm>=4.66.0
+
+# Hashing / config
+hashlib  # built-in
+
+# Type hints support
+typing-extensions>=4.8.0

@@ -1,0 +1,7 @@
+project_name: "XAU Trading Bot"
+strategy_version: "1.2.0"
+timezone: "Asia/Jerusalem"
+mode: "research"  # research / backtest / paper / live_alerts
+use_closed_candles_only: true
+allow_auto_trading: false
+log_level: "INFO"

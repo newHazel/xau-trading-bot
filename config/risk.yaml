@@ -1,0 +1,24 @@
+risk_per_trade_percent: 0.5
+max_risk_per_trade_percent: 1.0
+max_daily_losses: 2
+max_daily_trades: 3
+stop_after_tp: true
+rr_tiers:
+  min_to_enter: 2.0
+  required_for_grade_b: 1.5
+  required_for_grade_a: 2.0
+  required_for_grade_a_plus: 2.5
+tp1_r: 2.0
+tp2_r: 3.5
+require_liquidity_target_for_tp2: true
+atr_period: 14
+atr_sl_multiplier: 1.5
+swing_buffer_atr_ratio: 0.20
+sl_invalidation_mode: "min_of_sweep_and_fvg"  # sweep_low / fvg_bottom / min_of_sweep_and_fvg / swing_low
+sl_buffer_atr_ratio: 0.20
+re_entry:
+  allow_after_sl: false
+  allow_after_tp: false
+  require_new_setup_id: true
+  require_new_sweep: true
+  cooldown_minutes_after_loss: 60

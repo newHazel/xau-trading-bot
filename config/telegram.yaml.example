@@ -1,0 +1,14 @@
+# Copy this to telegram.yaml and fill in your values.
+# NEVER commit telegram.yaml to git — it contains secrets.
+# Use .env for bot_token and chat_id instead.
+
+bot_token: "${TELEGRAM_BOT_TOKEN}"
+chat_id: "${TELEGRAM_CHAT_ID}"
+enabled: true
+send_signals: true
+send_rejections: false
+send_heartbeat: true
+send_health_alerts: true
+send_daily_summary: true
+max_retries: 3
+retry_delay_seconds: 5

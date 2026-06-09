@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>XAU Web Chart</title>
+  <!-- TradingView Lightweight Charts (free, open-source) -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: -apple-system, system-ui, sans-serif; background: #0e1117; color: #e6e6e6; }
+    header { display: flex; gap: 12px; align-items: center; padding: 10px 16px; background: #161a25; border-bottom: 1px solid #2a2f3a; flex-wrap: wrap; }
+    header h1 { font-size: 16px; margin: 0 12px 0 0; font-weight: 600; }
+    select, button { background: #222735; color: #e6e6e6; border: 1px solid #3a4150; border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+    button { cursor: pointer; }
+    button:hover { background: #2c3242; }
+    .legend { font-size: 12px; color: #9aa4b2; margin-left: auto; display: flex; gap: 14px; }
+    .legend span::before { content: "—"; margin-right: 4px; font-weight: bold; }
+    .vwap::before { color: #f59e0b; } .ema50::before { color: #3b82f6; } .ema200::before { color: #a855f7; }
+    #price { width: 100%; height: 62vh; }
+    #rsi { width: 100%; height: 18vh; border-top: 1px solid #2a2f3a; }
+    #status { padding: 6px 16px; font-size: 12px; color: #9aa4b2; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>XAU Web Chart</h1>
+    <label>Symbol <select id="symbol"></select></label>
+    <label>TF <select id="tf"></select></label>
+    <label>Bars <select id="limit">
+      <option value="300">300</option>
+      <option value="600">600</option>
+      <option value="1000" selected>1000</option>
+      <option value="2000">2000</option>
+    </select></label>
+    <button id="reload">Reload</button>
+    <label style="font-size:13px"><input type="checkbox" id="auto" checked> Auto (60s)</label>
+    <label style="font-size:13px"><input type="checkbox" id="smc" checked> SMC</label>
+    <div class="legend">
+      <span class="vwap">VWAP</span><span class="ema50">EMA 50</span><span class="ema200">EMA 200</span>
+    </div>
+  </header>
+  <div id="price"></div>
+  <div id="rsi"></div>
+  <div id="status">loading…</div>
+
+  <script>
+    const LWC = LightweightCharts;
+    const statusEl = document.getElementById("status");
+
+    const baseOpts = {
+      layout: { background: { color: "#0e1117" }, textColor: "#c8cdd6" },
+      grid: { vertLines: { color: "#1b2130" }, horzLines: { color: "#1b2130" } },
+      timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#2a2f3a" },
+      rightPriceScale: { borderColor: "#2a2f3a" },
+      crosshair: { mode: LWC.CrosshairMode.Normal },
+    };
+
+    const priceChart = LWC.createChart(document.getElementById("price"), baseOpts);
+    const rsiChart = LWC.createChart(document.getElementById("rsi"), baseOpts);
+
+    const candleSeries = priceChart.addCandlestickSeries({
+      upColor: "#26a69a", downColor: "#ef5350", borderVisible: false,
+      wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+    });
+    const volSeries = priceChart.addHistogramSeries({
+      priceFormat: { type: "volume" }, priceScaleId: "",
+    });
+    volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
+
+    const vwapSeries = priceChart.addLineSeries({ color: "#f59e0b", lineWidth: 2, priceLineVisible: false });
+    const ema50Series = priceChart.addLineSeries({ color: "#3b82f6", lineWidth: 1, priceLineVisible: false });
+    const ema200Series = priceChart.addLineSeries({ color: "#a855f7", lineWidth: 1, priceLineVisible: false });
+
+    const rsiSeries = rsiChart.addLineSeries({ color: "#e879f9", lineWidth: 1 });
+    rsiSeries.createPriceLine({ price: 70, color: "#ef5350", lineStyle: 2, lineWidth: 1, title: "70" });
+    rsiSeries.createPriceLine({ price: 30, color: "#26a69a", lineStyle: 2, lineWidth: 1, title: "30" });
+
+    // keep the two charts' time axes in sync
+    function syncTime(src, dst) {
+      src.timeScale().subscribeVisibleLogicalRangeChange(r => { if (r) dst.timeScale().setVisibleLogicalRange(r); });
+    }
+    syncTime(priceChart, rsiChart);
+    syncTime(rsiChart, priceChart);
+
+    let zonePriceLines = [];
+    // SMC overlay state
+    let signalMarkers = [];
+    let smcMarkers = [];
+    let smcSeries = [];        // line series for OB/FVG zone bands
+    let smcPriceLines = [];    // price lines for liquidity levels
+    let lastCandleTime = null; // right edge for zone bands
+
+    function applyMarkers() {
+      const all = signalMarkers.concat(smcMarkers).sort((a, b) => a.time - b.time);
+      candleSeries.setMarkers(all);
+    }
+    function clearSMC() {
+      smcSeries.forEach(s => priceChart.removeSeries(s)); smcSeries = [];
+      smcPriceLines.forEach(pl => candleSeries.removePriceLine(pl)); smcPriceLines = [];
+      smcMarkers = [];
+    }
+
+    async function loadMeta() {
+      const r = await fetch("/api/meta");
+      const { symbols } = await r.json();
+      const symSel = document.getElementById("symbol");
+      const tfSel = document.getElementById("tf");
+      symSel.innerHTML = "";
+      Object.keys(symbols).forEach(s => symSel.add(new Option(s, s)));
+      const fillTfs = () => {
+        const tfs = symbols[symSel.value] || [];
+        const order = ["1m", "5m", "15m", "1h", "4h"];
+        tfs.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+        tfSel.innerHTML = "";
+        tfs.forEach(t => tfSel.add(new Option(t, t)));
+        if (tfs.includes("15m")) tfSel.value = "15m";
+      };
+      symSel.onchange = () => { fillTfs(); load(); };
+      fillTfs();
+    }
+
+    async function load() {
+      const symbol = document.getElementById("symbol").value;
+      const tf = document.getElementById("tf").value;
+      const limit = document.getElementById("limit").value;
+      statusEl.textContent = `loading ${symbol} ${tf}…`;
+      const r = await fetch(`/api/chart?symbol=${symbol}&tf=${tf}&limit=${limit}`);
+      const d = await r.json();
+
+      if (!d.candles.length) { statusEl.textContent = `no candles for ${symbol} ${tf}`; return; }
+
+      candleSeries.setData(d.candles);
+      volSeries.setData(d.volume || []);
+      vwapSeries.setData(d.indicators.vwap || []);
+      ema50Series.setData(d.indicators.ema50 || []);
+      ema200Series.setData(d.indicators.ema200 || []);
+      rsiSeries.setData(d.indicators.rsi || []);
+
+      // signal markers (A+/A/B) — stored, merged with SMC markers in applyMarkers()
+      signalMarkers = (d.signals || []).map(s => ({
+        time: s.time, position: s.position, color: s.color, shape: s.shape, text: s.text,
+      }));
+      lastCandleTime = d.candles.length ? d.candles[d.candles.length - 1].time : null;
+      applyMarkers();
+
+      await loadSMC();
+      priceChart.timeScale().fitContent();
+      const aPlus = d.signals.filter(s => s.grade === "A+" || s.grade === "A").length;
+      let lastTxt = "";
+      if (d.latest) {
+        const dt = new Date(d.latest * 1000);
+        lastTxt = ` · last candle ${dt.toLocaleString()}`;
+      }
+      const liveTxt = (d.live_fetched > 0) ? " 🟢 live" : "";
+      statusEl.textContent =
+        `${symbol} ${tf} · ${d.candles.length} bars · ${d.signals.length} signals (${aPlus} A/A+)${lastTxt}${liveTxt} · updated ${new Date().toLocaleTimeString()}`;
+    }
+
+    async function loadSMC() {
+      clearSMC();
+      if (!document.getElementById("smc").checked) { applyMarkers(); return; }
+      const symbol = document.getElementById("symbol").value;
+      const tf = document.getElementById("tf").value;
+      const limit = document.getElementById("limit").value;
+      let d;
+      try {
+        d = await (await fetch(`/api/smc?symbol=${symbol}&tf=${tf}&limit=${limit}`)).json();
+      } catch (e) { return; }
+      const rt = lastCandleTime;
+
+      // liquidity levels → horizontal price lines (EQH/PDH gold, EQL/PDL blue)
+      (d.liquidity || []).forEach(l => {
+        const up = (l.type === "EQH" || l.type === "PDH");
+        smcPriceLines.push(candleSeries.createPriceLine({
+          price: l.price, color: up ? "#fbbf24" : "#60a5fa",
+          lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: l.type,
+        }));
+      });
+
+      // OB + FVG zones → top/bottom bands from the zone's formation time to the right edge
+      function band(z, col) {
+        if (rt == null) return;
+        ["top", "bottom"].forEach(edge => {
+          const s = priceChart.addLineSeries({
+            color: col, lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
+            crosshairMarkerVisible: false,
+          });
+          s.setData([{ time: z.time, value: z[edge] }, { time: rt, value: z[edge] }]);
+          smcSeries.push(s);
+        });
+      }
+      (d.order_blocks || []).forEach(z =>
+        band(z, z.dir === "bull" ? "rgba(96,165,250,0.55)" : "rgba(249,115,22,0.55)"));
+      (d.fvgs || []).forEach(z =>
+        band(z, z.dir === "bull" ? "rgba(34,197,94,0.45)" : "rgba(239,83,80,0.45)"));
+
+      // structure markers
+      (d.swings || []).forEach(s => smcMarkers.push({
+        time: s.time, position: s.type === "high" ? "aboveBar" : "belowBar",
+        color: "#94a3b8", shape: "circle", text: "",
+      }));
+      (d.sweeps || []).forEach(s => smcMarkers.push({
+        time: s.time, position: s.dir === "bull" ? "belowBar" : "aboveBar",
+        color: "#eab308", shape: s.dir === "bull" ? "arrowUp" : "arrowDown", text: "sweep",
+      }));
+      (d.bos || []).forEach(s => smcMarkers.push({
+        time: s.time, position: s.dir === "bull" ? "belowBar" : "aboveBar",
+        color: "#22d3ee", shape: "square", text: "BOS",
+      }));
+      (d.choch || []).forEach(s => smcMarkers.push({
+        time: s.time, position: s.dir === "bull" ? "belowBar" : "aboveBar",
+        color: "#f472b6", shape: "square", text: "CHoCH",
+      }));
+      applyMarkers();
+    }
+
+    document.getElementById("reload").onclick = load;
+    document.getElementById("tf").onchange = load;
+    document.getElementById("limit").onchange = load;
+    document.getElementById("smc").onchange = loadSMC;
+
+    new ResizeObserver(() => {
+      priceChart.applyOptions({}); rsiChart.applyOptions({});
+    }).observe(document.body);
+
+    // auto-refresh every 60s when the "Auto" box is checked
+    let autoTimer = null;
+    function setupAuto() {
+      if (autoTimer) clearInterval(autoTimer);
+      autoTimer = setInterval(() => {
+        if (document.getElementById("auto").checked) load();
+      }, 60000);
+    }
+
+    (async () => { await loadMeta(); await load(); setupAuto(); })();
+  </script>
+</body>
+</html>

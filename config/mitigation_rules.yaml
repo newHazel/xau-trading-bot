@@ -1,0 +1,10 @@
+wick_touch_counts_as: "tapped"
+close_inside_counts_as: "partial"
+thresholds:
+  tapped_max_fill_pct: 0.25
+  partial_max_fill_pct: 0.50
+  deep_max_fill_pct: 0.80
+  full_fill_pct: 0.80
+max_allowed_fill_percent_for_live: 0.50
+max_allowed_fill_percent_for_paper: 0.80
+invalidate_if_close_beyond_zone: true

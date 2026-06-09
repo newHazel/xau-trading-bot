@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+.gitignore
+tests/
+*.md
+.venv/
+venv/
+# keep the DB out of the image — it lives in the named volume
+data/database/*.sqlite
+data/database/*.sqlite-*

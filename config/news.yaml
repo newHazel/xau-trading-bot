@@ -1,0 +1,23 @@
+tiers:
+  tier_1:
+    events: ["FOMC", "Interest Rate Decision", "NFP", "Powell Speech"]
+    block_before_minutes: 60
+    block_after_minutes: 60
+  tier_2:
+    events: ["CPI", "PCE", "Core CPI", "Core PCE"]
+    block_before_minutes: 45
+    block_after_minutes: 45
+  tier_3:
+    events: ["Unemployment Rate", "Retail Sales", "GDP", "ISM Manufacturing"]
+    block_before_minutes: 30
+    block_after_minutes: 30
+  tier_4:
+    events: ["PPI", "Building Permits", "Consumer Confidence"]
+    block_before_minutes: 0
+    block_after_minutes: 0
+    degrade_grade: true
+fallback:
+  use_manual_csv_if_api_fails: true
+  manual_csv_path: "data/calendar/manual_news.csv"
+  if_no_news_data: "degraded_mode"
+  degraded_mode_max_grade: "B"

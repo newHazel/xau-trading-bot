@@ -1,0 +1,43 @@
+fvg_min_atr_ratio: 0.3
+eqh_eql_tolerance_atr_ratio: 0.15
+sweep_requires_close_back_inside: true
+premium_discount_midpoint: 0.5
+ob_required: false
+dxy_required: false
+displacement:
+  enabled: true
+  atr_period: 14
+  min_body_atr_multiplier: 1.2
+  strong_body_atr_multiplier: 1.5
+  min_body_to_range_ratio: 0.60
+  strong_body_to_range_ratio: 0.65
+  breakout_lookback_candles: 5
+  require_close_outside_range: true
+  use_volume_if_available: false
+  volume_ma_period: 20
+  min_volume_multiplier: 1.2
+mitigation:
+  wick_touch_counts_as: "tapped"
+  close_inside_counts_as: "partial"
+  full_mitigation_fill_percent: 0.80
+  max_allowed_fill_percent_for_live: 0.50
+  invalidate_if_close_beyond_zone: true
+fvg_touch_rules:
+  max_touches_for_backtest: 2
+  max_touches_for_paper: 1
+  max_touches_for_live: 1
+  wick_touch_is_touch: true
+  close_inside_is_stronger_touch: true
+  reject_after_second_touch: true
+sweep:
+  require_wick_beyond_level: true
+  require_close_back_inside: true
+  confirmation_window_candles: 5
+  min_wick_penetration_atr_multiplier: 0.05
+  require_micro_choch_after_sweep: true
+  allow_displacement_as_confirmation: true
+  reject_if_no_confirmation_after_window: true
+zone_freshness:
+  max_minutes_in_zone_before_decay: 15
+  decay_grade_after_minutes: true
+  invalidate_after_minutes: 60

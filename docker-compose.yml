@@ -1,0 +1,36 @@
+# Two always-on services:
+#   alerts — the live loop (fetch latest → SequenceRunner → Telegram on A/A+)
+#   chart  — the web chart UI on http://<server>:8000
+#
+# Both share the same SQLite DB via a named volume, read secrets from .env, and
+# auto-restart if they crash. Start:  docker compose up -d --build
+#
+# IMPORTANT: .env must contain TWELVE_DATA_API_KEY (+ TELEGRAM_* for alerts).
+
+services:
+  alerts:
+    build: .
+    image: xau-bot
+    restart: unless-stopped
+    env_file: .env
+    command: >
+      python scripts/live_alerts.py
+      --symbol XAUUSD --execution-tf 5m --interval 240
+    volumes:
+      - xau-data:/app/data
+    # 5m execution → interval 240s (4 min) ≤ TF so no closed candle is missed.
+    # Fetches 15m+5m each cycle (HTF cached hourly) = ~2 calls/cycle, safe under quota.
+
+  chart:
+    build: .
+    image: xau-bot
+    restart: unless-stopped
+    env_file: .env
+    command: python -m webchart.server --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - xau-data:/app/data
+
+volumes:
+  xau-data:

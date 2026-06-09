@@ -1,0 +1,33 @@
+timezone: "Asia/Jerusalem"
+asia_range:
+  enabled: true
+  start: "02:00"
+  end: "07:00"
+  trade_allowed: false
+  mark_high_low: true
+london_kill_zone:
+  enabled: true
+  start: "10:00"
+  end: "13:00"
+  trade_allowed: true
+ny_kill_zone:
+  enabled: true
+  start: "15:30"
+  end: "18:00"
+  trade_allowed: true
+overlap:
+  enabled: true
+  start: "15:30"
+  end: "17:00"
+  trade_allowed: true
+  priority: "highest"
+fix_levels:
+  shanghai_pm_fix: "04:30"
+  london_am_fix: "12:30"
+  london_pm_fix: "17:00"
+  mark_only: true
+dst:
+  use_broker_timezone: true
+  convert_to_local_for_display: true
+  handle_dst_transitions: true
+  dst_transition_buffer_days: 3

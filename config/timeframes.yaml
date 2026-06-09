@@ -1,0 +1,12 @@
+base_timeframe: "1m"
+analysis_timeframes:
+  - "5m"
+  - "15m"
+  - "1h"
+  - "4h"
+fractal_windows:
+  "1m": 3
+  "5m": 5
+  "15m": 5
+  "1h": 3
+  "4h": 3

@@ -1,0 +1,15 @@
+enabled: true
+timezone: "Asia/Jerusalem"
+block_weekends: true
+monday_open_cooldown_minutes: 120
+friday_late_close_block: true
+friday_block_after: "21:00"
+use_manual_holidays_csv: true
+manual_holidays_path: "data/calendar/market_holidays.csv"
+gap_detection:
+  enabled: true
+  max_missing_candles_allowed: 2
+  price_gap_atr_multiplier_warning: 1.0
+  price_gap_atr_multiplier_block: 1.5
+  cooldown_after_gap_minutes: 60
+  weekend_gap_cooldown_minutes: 120

@@ -1,0 +1,11 @@
+symbol: "XAUUSD"
+quote_unit: "USD_per_ounce"
+spread_mode: "fixed_or_dynamic"
+default_spread: 0.25
+default_slippage: 0.10
+commission_per_lot: 0.0
+use_bid_ask_if_available: true
+conservative_backtest: true
+news_slippage_multiplier: 3.0
+high_volatility_slippage_multiplier: 2.0
+measure_from_data_if_possible: true

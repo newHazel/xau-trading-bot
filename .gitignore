@@ -1,0 +1,58 @@
+# Secrets
+.env
+config/telegram.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.so
+.installed.cfg
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Data (raw / large files)
+data/raw/*.csv
+data/processed/*.csv
+data/database/*.sqlite
+
+# Reports (generated)
+data/reports/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/

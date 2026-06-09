@@ -1,0 +1,16 @@
+enabled: true
+atr_period: 14
+min_body_atr_multiplier: 1.2
+strong_body_atr_multiplier: 1.5
+min_body_to_range_ratio: 0.60
+strong_body_to_range_ratio: 0.65
+breakout_lookback_candles: 5
+require_close_outside_range: true
+use_volume_if_available: false
+volume_ma_period: 20
+min_volume_multiplier: 1.2
+# A candle is displacement if it meets 2 out of 3:
+# 1. body_size >= ATR * min_body_atr_multiplier
+# 2. body_to_range_ratio >= min_body_to_range_ratio
+# 3. close breaks out of last breakout_lookback_candles
+conditions_required: 2
