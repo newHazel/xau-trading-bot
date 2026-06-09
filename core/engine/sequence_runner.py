@@ -102,6 +102,22 @@ class SequenceRunner:
         ctx = self._populate(bar, history)
         now = ctx.timestamp
 
+        # Once the FVG is captured, PIN it: retrace AND entry must reference that
+        # exact zone. Otherwise a newer FVG re-selected each bar can spuriously
+        # satisfy "retrace" while the entry still uses the (possibly stale) captured
+        # FVG — producing an entry far from price (the 08:40 bug). Re-evaluate
+        # retrace as "did THIS bar's price come back to the captured FVG zone".
+        cap_fvg = self._captured.get("fvg")
+        if cap_fvg is not None:
+            ctx.fvg = cap_fvg
+            df = history.get(self._exec_tf) if isinstance(history, dict) else None
+            if df is not None and getattr(df, "empty", True) is False and len(df) >= 1:
+                lo = min(cap_fvg["top"], cap_fvg["bottom"])
+                hi = max(cap_fvg["top"], cap_fvg["bottom"])
+                rl = float(df["low"].iloc[-3:].min())
+                rh = float(df["high"].iloc[-3:].max())
+                ctx.retraced_to_zone = (rl <= hi and rh >= lo)
+
         # cooldown after a signal
         if self._cooldown_left > 0:
             self._cooldown_left -= 1
