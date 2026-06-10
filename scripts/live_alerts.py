@@ -112,7 +112,12 @@ def main() -> None:
     try:
         while True:
             n += 1
-            cycle(n)
+            try:
+                cycle(n)
+            except Exception as exc:
+                # A 24/7 bot must survive transient failures (network blips, API
+                # timeouts/limits). Log and keep going — never let one cycle kill it.
+                print(f"\n[cycle {n}] error: {type(exc).__name__}: {exc} — continuing")
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\n(stopped)")

@@ -9,6 +9,9 @@ oandapyV20>=0.7.0
 pybit>=5.0.0
 yfinance>=0.2.0
 
+# HTTP (Twelve Data fetcher, Telegram sender, web chart)
+requests>=2.31.0
+
 # Database
 # SQLite is built-in to Python — no extra package needed
 
@@ -33,9 +36,6 @@ uvicorn>=0.27.0
 
 # Backtesting utilities
 tqdm>=4.66.0
-
-# Hashing / config
-hashlib  # built-in
 
 # Type hints support
 typing-extensions>=4.8.0
