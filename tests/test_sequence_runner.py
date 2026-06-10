@@ -143,3 +143,44 @@ class TestNoSignalWhenGatesFail:
         })
         sig = r.on_bar(_bar(0), {})
         assert sig is None  # kill_zone gate fails → not approved
+
+
+class TestRepinGating:
+    """The periodic FVG re-pin must only fire BEFORE the retrace gate is validated.
+    Re-pinning after retrace passed would let entry/SL/TP use a zone that retrace was
+    never validated against (the cross-bar form of the 08:40 entry-vs-retrace bug)."""
+
+    def _df(self, price):
+        import pandas as pd
+        return {"15m": pd.DataFrame({"close": [price]},
+                                    index=pd.to_datetime(["2026-06-10T14:00:00Z"]))}
+
+    FAR = {"top": 4242.0, "bottom": 4238.0}   # ~58 pts above price 4180
+    NEAR = {"top": 4184.0, "bottom": 4182.0}  # ~2 pts above price 4180
+
+    def test_repins_to_nearer_zone_while_waiting_for_retrace(self):
+        r = _runner(_Script())
+        r._sm.force_state(State.WAITING_FOR_RETRACE_TO_ZONE, "test", NOW)
+        r._captured["fvg"] = self.FAR
+        r._bars_since_repin = r._repin_interval - 1  # next call hits the interval
+        out = r._maybe_repin(self.FAR, self.NEAR, self._df(4180.0))
+        assert out is self.NEAR
+        assert r._captured["fvg"] is self.NEAR  # entry will now use the nearer zone
+
+    def test_does_not_repin_after_retrace_passed(self):
+        # FSM has advanced past retrace → the validated zone must be frozen.
+        r = _runner(_Script())
+        r._sm.force_state(State.WAITING_FOR_MICRO_CHOCH, "test", NOW)
+        r._captured["fvg"] = self.FAR
+        r._bars_since_repin = 999  # interval long satisfied — only the state guard matters
+        out = r._maybe_repin(self.FAR, self.NEAR, self._df(4180.0))
+        assert out is self.FAR
+        assert r._captured["fvg"] is self.FAR  # entry == retrace-validated zone
+
+    def test_disabled_flag_never_repins(self):
+        r = SequenceRunner({**CONFIG, "fvg_freshness_enabled": False}, hooks=_hooks(_Script()))
+        r._sm.force_state(State.WAITING_FOR_RETRACE_TO_ZONE, "test", NOW)
+        r._captured["fvg"] = self.FAR
+        r._bars_since_repin = 999
+        out = r._maybe_repin(self.FAR, self.NEAR, self._df(4180.0))
+        assert out is self.FAR  # legacy behavior: pinned zone never swapped

@@ -92,6 +92,14 @@ class SequenceRunner:
         self._captured: Dict[str, Any] = {}
         self._counter = 0
 
+        # Periodic re-pin of the captured FVG: prefer fresh+near zones, never stay
+        # stuck on a stale/far gap waiting for an impossible retrace (the 2026-06-10
+        # ~4180 miss). Same config switch as the selection scorer.
+        self._repin_enabled = bool(config.get("fvg_freshness_enabled", True))
+        self._repin_interval = int(config.get("fvg_repin_interval_bars", 5))
+        self._repin_min_gain = float(config.get("fvg_repin_min_improvement_points", 8.0))
+        self._bars_since_repin = 0
+
     @property
     def state(self) -> State:
         return self._sm.state
@@ -107,8 +115,14 @@ class SequenceRunner:
         # satisfy "retrace" while the entry still uses the (possibly stale) captured
         # FVG — producing an entry far from price (the 08:40 bug). Re-evaluate
         # retrace as "did THIS bar's price come back to the captured FVG zone".
+        fresh_fvg = ctx.fvg  # best zone smc_hook just selected this bar (may be None)
         cap_fvg = self._captured.get("fvg")
         if cap_fvg is not None:
+            # Before re-evaluating retrace, optionally RE-PIN to a clearly nearer
+            # same-direction zone (every repin_interval bars, before retrace fires).
+            # Both retrace AND entry read self._captured["fvg"], so they stay
+            # consistent — no 08:40-style entry-vs-retrace mismatch is reintroduced.
+            cap_fvg = self._maybe_repin(cap_fvg, fresh_fvg, history)
             ctx.fvg = cap_fvg
             df = history.get(self._exec_tf) if isinstance(history, dict) else None
             if df is not None and getattr(df, "empty", True) is False and len(df) >= 1:
@@ -159,6 +173,47 @@ class SequenceRunner:
         return None
 
     # ------------------------------------------------------------------ #
+
+    def _maybe_repin(self, cap_fvg: Dict[str, Any], fresh_fvg: Optional[Dict[str, Any]],
+                     history: Any) -> Dict[str, Any]:
+        """Swap the pinned FVG for a clearly nearer same-direction one, at most once
+        every `repin_interval` bars. Keeps the engine from waiting out a stale/far gap
+        on a one-directional move. The freshest+nearest candidate is whatever smc_hook
+        already selected this bar.
+
+        CRITICAL: only re-pin while the FSM is still WAITING_FOR_RETRACE_TO_ZONE. The
+        retrace gate is validated exactly once (the FSM is forward-only) and entry/
+        SL/TP read the captured zone — so swapping AFTER retrace has passed would make
+        the trade execute on a zone price never retraced into. That is the cross-bar
+        form of the 08:40 entry-vs-retrace bug; the state guard below prevents it."""
+        if not self._repin_enabled or fresh_fvg is None or fresh_fvg is cap_fvg:
+            return cap_fvg
+        if self._sm.state != State.WAITING_FOR_RETRACE_TO_ZONE:
+            return cap_fvg
+        self._bars_since_repin += 1
+        if self._bars_since_repin < self._repin_interval:
+            return cap_fvg
+        df = history.get(self._exec_tf) if isinstance(history, dict) else None
+        if df is None or getattr(df, "empty", True) is True or len(df) < 1:
+            return cap_fvg
+        self._bars_since_repin = 0  # consume the interval only when we truly evaluate
+        price = float(df["close"].iloc[-1])
+
+        def _near(f: Dict[str, Any]) -> float:
+            lo = min(f["top"], f["bottom"]); hi = max(f["top"], f["bottom"])
+            if price < lo:
+                return lo - price
+            if price > hi:
+                return price - hi
+            return 0.0
+
+        d_cap = _near(cap_fvg)
+        if d_cap == 0.0:
+            return cap_fvg  # price already at/in the pinned zone — keep it
+        if _near(fresh_fvg) + self._repin_min_gain < d_cap:
+            self._captured["fvg"] = fresh_fvg
+            return fresh_fvg
+        return cap_fvg
 
     def _populate(self, bar: Any, history: Any) -> PipelineContext:
         ts = getattr(bar, "timestamp", None) or (bar.get("timestamp") if isinstance(bar, dict) else None)
@@ -231,6 +286,7 @@ class SequenceRunner:
         self._bars_in_setup = 0
         self._locked_direction = None
         self._captured = {}
+        self._bars_since_repin = 0
 
     def _default_setup_id(self, ctx: PipelineContext) -> str:
         self._counter += 1

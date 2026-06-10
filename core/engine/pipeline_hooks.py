@@ -115,6 +115,66 @@ def _collect_levels(liq_df: pd.DataFrame, swing_df: pd.DataFrame, smc_dir: str) 
 # STAGE 1 — structure (4H macro bias + 1H permission + premium/discount)  #
 # ====================================================================== #
 
+def select_fvg(candidates: list, df: pd.DataFrame, config: Dict[str, Any]) -> Optional[Dict]:
+    """Pick the best tradeable FVG zone for entry.
+
+    Legacy (fvg_freshness_enabled=false): returns the newest matching zone
+    (candidates are newest-first), preserving the original behavior exactly.
+
+    Enabled (default): scores every candidate by PROXIMITY (distance from the
+    current price, in ATR units) and FRESHNESS (bars since the gap formed), and
+    picks the best. Zones beyond the distance/age caps are heavily PENALIZED but
+    never discarded — so a valid setup is still taken when nothing fresher/nearer
+    exists ("don't give up on the old, just prefer the fresh"). This stops the
+    engine pinning a stale prior-day gap far from price and waiting forever for an
+    impossible retrace (the 2026-06-10 ~4180 short it missed)."""
+    if not candidates:
+        return None
+    if not bool(config.get("fvg_freshness_enabled", True)):
+        return candidates[0]  # legacy: newest-first
+
+    price = float(df["close"].iloc[-1])
+    atr = compute_atr(df, 14)
+    if not atr or atr != atr:  # 0.0 or NaN guard
+        rng = float((df["high"].astype(float) - df["low"].astype(float)).tail(14).mean())
+        atr = rng if rng and rng == rng else 1.0
+
+    w_dist = float(config.get("fvg_distance_weight", 1.0))
+    w_age = float(config.get("fvg_age_weight", 0.5))
+    max_dist_atr = float(config.get("fvg_max_distance_atr", 4.0))
+    max_age_bars = int(config.get("fvg_max_age_bars", 120))
+    OVER = 100.0  # soft penalty for breaching a cap: deprioritize, never exclude
+
+    def _near_dist(u: Dict) -> float:
+        lo = min(u["top"], u["bottom"]); hi = max(u["top"], u["bottom"])
+        if price < lo:
+            return lo - price
+        if price > hi:
+            return price - hi
+        return 0.0  # price already inside the zone
+
+    def _age_bars(u: Dict) -> int:
+        ts = u.get("confirm_ts")
+        if ts is None or ts != ts:  # None or NaT
+            return 0
+        try:
+            return int((df.index > ts).sum())
+        except (TypeError, ValueError):  # tz mismatch / bad ts → distance-only score
+            return 0
+
+    def _score(u: Dict) -> float:
+        dist_atr = _near_dist(u) / atr if atr > 0 else _near_dist(u)
+        age = _age_bars(u)
+        pen = w_dist * dist_atr + w_age * (age / max(max_age_bars, 1))
+        if dist_atr > max_dist_atr:
+            pen += OVER
+        if age > max_age_bars:
+            pen += OVER
+        return pen
+
+    return min(candidates, key=_score)
+
+
 def make_structure_hook(config: Optional[Dict[str, Any]] = None,
                         htf: str = "4h", mtf: str = "1h") -> StageHook:
     config = config or {}
@@ -247,15 +307,33 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
         fvg_df = fvgs.detect(df)
         mitig_df = mitigation.track(fvg_df)
         unmitigated = mitigation.get_unmitigated_fvgs(mitig_df, n=10)  # newest-first
-        tradeable_states = {"fresh", "tapped", "partial"}
-        chosen_fvg = next(
-            (u for u in unmitigated
-             if u["fvg_type"] == smc_dir and u["state"] in tradeable_states), None)
+        # get_unmitigated_fvgs returns {fresh, tapped, partial, deep} — every zone
+        # that still has gap left. We deliberately trade the STRICTER subset here
+        # and exclude 'deep' (fill 0.50–0.80): that matches the LIVE gate in
+        # config/mitigation_rules.yaml (max_allowed_fill_percent_for_live: 0.50 ==
+        # partial_max; 'deep' only fits the 0.80 paper cap), and agrees with
+        # zone_lifecycle_manager, which classifies 'deep' as 'mitigated'. Adding
+        # 'deep' would loosen the entry zone and INCREASE signal frequency — a
+        # behavior change to backtest first, not a behavior-preserving cleanup.
+        tradeable_states = {"fresh", "tapped", "partial"}  # excludes 'deep' by design
+        candidates = [u for u in unmitigated
+                      if u["fvg_type"] == smc_dir and u["state"] in tradeable_states]
+        # Prefer the freshest + nearest zone (config: fvg_freshness_enabled);
+        # falls back to older/further zones rather than discarding them.
+        chosen_fvg = select_fvg(candidates, df, config)
         ctx.fvg = chosen_fvg
         ctx.fvg_valid = chosen_fvg is not None
         ctx.fvg_fresh = chosen_fvg is not None  # unmitigated by construction
         if chosen_fvg is not None:
             # --- retrace into the FVG zone + confirmation candle ---
+            # NOTE: ctx.retraced_to_zone here is computed against the FRESHLY
+            # re-selected FVG. It is authoritative only on the NON-PINNED path
+            # (SignalPipeline.process_bar, which has no setup capture). Under
+            # SequenceRunner, once an FVG is captured the runner OVERWRITES
+            # ctx.retraced_to_zone against the PINNED zone (sequence_runner.on_bar,
+            # ~L110-119), so on later bars this line's result is superseded. Keep
+            # it: the non-pinned path depends on it, and on the bar the FVG is
+            # first captured it equals the pinned value (same zone).
             lo = min(chosen_fvg["top"], chosen_fvg["bottom"])
             hi = max(chosen_fvg["top"], chosen_fvg["bottom"])
             recent_low = float(df["low"].iloc[-3:].min())
