@@ -23,6 +23,7 @@ from core.engine.sequence_runner import SequenceRunner
 from core.alerts.telegram_sender import TelegramSender
 from core.monitoring.telegram_dedup import TelegramDedup
 from core.monitoring.heartbeat import HeartbeatManager
+from core.alerts.outcome_tracker import OutcomeTracker
 
 DEFAULT_TFS = ["4h", "1h", "15m", "5m"]
 
@@ -67,6 +68,9 @@ class LiveAlertEngine:
             tradeable_grades=tuple(live.tradeable_grades),
         )
         self._dedup = TelegramDedup({"max_dedup_history": 500})
+        # forward paper-trade measurement (no effect on signals) — records each alert
+        # and resolves it WIN/LOSS so we accumulate a real forward win%/PF/R record.
+        self._tracker = OutcomeTracker()
         self._hb = HeartbeatManager({"interval_minutes": live.heartbeat_minutes, "enabled": True})
         self._hb_started = False
         self._alerts_sent = 0
@@ -153,6 +157,10 @@ class LiveAlertEngine:
             except Exception:
                 pass
         self._hb.update_signal(sig.setup_id, now)
+        try:  # forward measurement only — must never break the alert path
+            self._tracker.record(sig, now)
+        except Exception:
+            pass
         return sig
 
     def maybe_heartbeat(self, state: str = "SCANNING", health: str = "healthy",
@@ -165,7 +173,12 @@ class LiveAlertEngine:
         # the clock so the next one fires only after the configured interval.
         if self._hb.is_due(now):
             msg = self._hb.generate(state, health, self._trades_today, now)
-            self._sender.send(msg.format_telegram())
+            text = msg.format_telegram()
+            try:  # show the running forward record in the heartbeat (measurement only)
+                text += "\n\n📊 " + self._tracker.summary_line()
+            except Exception:
+                pass
+            self._sender.send(text)
             return True
         return False
 
@@ -174,6 +187,10 @@ class LiveAlertEngine:
         now = self._now_fn()
         self.maybe_heartbeat(now=now)
         history = self.fetch_history(now)
+        try:  # resolve any open paper-trades against the newest bar (measurement only)
+            self._tracker.update(history.get(self._live.execution_tf), self._sender, now)
+        except Exception:
+            pass
         return self.check_once(history, now)
 
     # ------------------------------------------------------------------ #
