@@ -59,6 +59,11 @@ VARIANTS = {
     # adder but riskiest (touches zone selection where #1 hurt) — does it ADD GOOD signals?
     "multizone": {"fvg_freshness_enabled": True,  "fvg_direction_aware": False, "require_zone_rejection": False,
                   "fvg_multizone": True},
+    # #2 sweep-early on top of LIVE: arm the sequence on a fresh wick (provisional
+    # sweep) instead of waiting out the close-back lag — targets the stuck-at-sweep
+    # case. Catches grabs faster BUT can fire on breakouts; does the net help?
+    "sweep_early": {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
+                    "sweep_early": True},
 }
 
 

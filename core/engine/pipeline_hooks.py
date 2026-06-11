@@ -115,6 +115,27 @@ def _collect_levels(liq_df: pd.DataFrame, swing_df: pd.DataFrame, smc_dir: str) 
 # STAGE 1 — structure (4H macro bias + 1H permission + premium/discount)  #
 # ====================================================================== #
 
+def _provisional_sweep(df: pd.DataFrame, smc_dir: str, last_pos: int,
+                       lookback: int = 20) -> Optional[Dict]:
+    """#2: a fresh WICK beyond the recent extreme = a liquidity grab. Treat it as a
+    PROVISIONAL sweep so the sequence arms on the wick instead of waiting out the
+    lagging close-back confirmation (the stuck-at-LIQUIDITY_SWEEP case). Returns
+    {level, confirm_pos} or None. Catches real grabs faster but also fires on
+    breakouts — the downstream FVG/retrace/confirmation gates still filter."""
+    if df is None or len(df) < lookback + 3:
+        return None
+    h = df["high"].astype(float); l = df["low"].astype(float)
+    if smc_dir == "bear":  # short: last 1-2 bars spiked ABOVE the prior high
+        prior = float(h.iloc[-(lookback + 2):-2].max())
+        if float(h.iloc[-2:].max()) > prior:
+            return {"level": prior, "confirm_pos": last_pos}
+    else:                  # long: last 1-2 bars spiked BELOW the prior low
+        prior = float(l.iloc[-(lookback + 2):-2].min())
+        if float(l.iloc[-2:].min()) < prior:
+            return {"level": prior, "confirm_pos": last_pos}
+    return None
+
+
 def select_fvg(candidates: list, df: pd.DataFrame, config: Dict[str, Any]) -> Optional[Dict]:
     """Pick the best tradeable FVG zone for entry.
 
@@ -284,6 +305,16 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
         ctx.sweep_confirmed = (
             last_sweep is not None and (last_pos - last_sweep["confirm_pos"]) <= recency
         )
+        # #2 (sweep_early, default OFF): if no CONFIRMED sweep, accept a fresh WICK
+        # beyond the recent extreme as a PROVISIONAL sweep — arm on the wick instead of
+        # waiting out the close-back lag (the stuck-at-LIQUIDITY_SWEEP case). Trade-off:
+        # catches real grabs faster but can also arm on breakouts. Validate before live.
+        if config.get("sweep_early", False) and not ctx.sweep_confirmed:
+            prov = _provisional_sweep(df, smc_dir, last_pos,
+                                      int(config.get("sweep_early_lookback", 20)))
+            if prov is not None:
+                ctx.sweep = prov
+                ctx.sweep_confirmed = True
 
         # --- micro-CHoCH: a recent change of character in the trade direction, on
         #     the execution TF OR the lower "micro" TF (doc: "CHoCH on 5m"). Either. ---

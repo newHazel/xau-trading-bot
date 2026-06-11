@@ -80,3 +80,31 @@ class TestStructureHookOnTinyData:
         hook(ctx, {}, {"4h": df, "1h": df})
         # htf_bias should be set to something (string) or remain None — just no crash
         assert ctx.htf_bias is None or isinstance(ctx.htf_bias, str)
+
+
+class TestProvisionalSweep:
+    """#2: a fresh wick beyond the recent extreme = a provisional sweep (arm on the
+    wick), but a flat range yields no sweep."""
+
+    def _df(self, highs, lows=None):
+        n = len(highs)
+        idx = pd.date_range("2026-06-11", periods=n, freq="5min", tz="UTC")
+        lows = lows or [h - 2 for h in highs]
+        return pd.DataFrame({"open": [100.0] * n, "high": highs, "low": lows,
+                             "close": [100.0] * n}, index=idx)
+
+    def test_short_wick_above_prior_high(self):
+        from core.engine.pipeline_hooks import _provisional_sweep
+        highs = [101.0] * 23 + [110.0, 109.0]  # last 2 bars spike above the ~101 high
+        sw = _provisional_sweep(self._df(highs), "bear", len(highs) - 1, lookback=20)
+        assert sw is not None and sw["level"] == 101.0
+
+    def test_long_wick_below_prior_low(self):
+        from core.engine.pipeline_hooks import _provisional_sweep
+        lows = [99.0] * 23 + [90.0, 91.0]      # last 2 bars spike below the ~99 low
+        sw = _provisional_sweep(self._df([102.0] * 25, lows), "bull", 24, lookback=20)
+        assert sw is not None and sw["level"] == 99.0
+
+    def test_flat_range_no_sweep(self):
+        from core.engine.pipeline_hooks import _provisional_sweep
+        assert _provisional_sweep(self._df([101.0] * 25), "bear", 24, lookback=20) is None
