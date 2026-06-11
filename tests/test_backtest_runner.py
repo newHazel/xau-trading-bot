@@ -62,6 +62,25 @@ class TestBasicRun:
         assert result.total_bars == 30
 
 
+class TestEntryTrigger:
+    """F3: a signal becomes a trade only once a bar trades THROUGH its entry price;
+    a limit entry the market never reaches must not be counted as a (winning) trade."""
+
+    def test_unreached_entry_produces_no_trade(self, config):
+        df = _make_df(50)  # price ~2000 and rising; an entry at 1900 is never touched
+        signals = [{"bar_index": 5, "direction": "long", "entry": 1900.0,
+                    "sl": 1895.0, "tp1": 1910.0, "tp2": 1917.5, "lot_size": 0.10}]
+        result = BacktestRunner(config).run(df, signals=signals)
+        assert len(result.trades) == 0
+
+    def test_reached_entry_produces_trade(self, config):
+        df = _make_df(50)  # bar ranges bracket 2000.5 → the limit fills
+        signals = [{"bar_index": 5, "direction": "long", "entry": 2000.5,
+                    "sl": 1995.0, "tp1": 2010.0, "tp2": 2017.5, "lot_size": 0.10}]
+        result = BacktestRunner(config).run(df, signals=signals)
+        assert len(result.trades) >= 1
+
+
 class TestDailyLimits:
     def test_daily_trade_limit(self, config):
         df = _make_df(200)

@@ -130,6 +130,7 @@ class BacktestRunner:
     ) -> BacktestResult:
         self._trades.clear()
         self._open_position = None
+        self._pending = None  # F3: a signal waiting for price to trade through its entry
         self._setup_counter = 0
         self._daily_trades.clear()
         self._daily_losses.clear()
@@ -169,6 +170,13 @@ class BacktestRunner:
         if self._open_position and self._open_position.is_open:
             return
 
+        # F3: a pending limit entry only fills once a bar's range trades THROUGH it —
+        # a signal whose FVG-edge entry price is never touched must NOT count as a trade.
+        if self._pending is not None:
+            self._check_pending_entry(bar)
+            if (self._open_position and self._open_position.is_open) or self._pending is not None:
+                return  # just opened on this bar, or still waiting for the entry touch
+
         if self._is_gap_cooldown(bar.timestamp):
             return
         if self._is_news_blocked(bar.timestamp):
@@ -178,7 +186,27 @@ class BacktestRunner:
 
         signal = self._get_signal_for_bar(bar)
         if signal:
-            self._open_trade(signal, bar)
+            self._arm_pending(signal, bar)
+
+    def _arm_pending(self, signal: Dict[str, Any], bar: ReplayBar) -> None:
+        """F3: stage a signal as a pending limit entry instead of filling it blindly."""
+        self._pending = {
+            "signal": signal,
+            "armed_bar": bar.bar_index,
+            "entry": signal.get("entry", bar.close),
+        }
+
+    def _check_pending_entry(self, bar: ReplayBar) -> None:
+        """Fill the pending entry only on a bar that brackets the limit price; drop it
+        if the entry is never touched within the trigger window (price ran away)."""
+        p = self._pending
+        expiry = getattr(self._config, "entry_trigger_expiry_bars", 12)
+        if bar.bar_index - p["armed_bar"] > expiry:
+            self._pending = None          # entry never touched in time → no trade
+            return
+        if bar.low <= p["entry"] <= bar.high:   # bar traded through the limit → fill
+            self._pending = None
+            self._open_trade(p["signal"], bar)
 
     def _get_signal_for_bar(self, bar: ReplayBar) -> Optional[Dict[str, Any]]:
         while self._signal_idx < len(self._signals_queue):
