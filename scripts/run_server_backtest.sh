@@ -61,9 +61,9 @@ echo ">>> [3/4] verifying the parallel backtest tool (chunked == sequential)"
 python -u scripts/backtest_sequence_parallel.py --verify --jobs "${JOBS}" || {
   echo "VERIFY FAILED — not trusting parallel numbers"; sleep 3600; exit 1; }
 
-echo ">>> [4/4] running ablation: baseline -> freshness(=LIVE) -> multizone (~6000 bars / ~4 weeks)"
+echo ">>> [4/4] running ablation: baseline -> freshness(=LIVE) -> sweep_early (~6000 bars / ~4 weeks)"
 echo "    sweep_early = LIVE config + #2 (arm the sequence on a provisional wick-sweep)"
-echo "    KEY: does multizone ADD signals while keeping PF >= freshness?"
+echo "    KEY: does sweep_early ADD signals while keeping PF >= freshness?"
 echo "    (small chunks -> watch chunks finish ONE BY ONE as progress)"
 python -u scripts/backtest_sequence_parallel.py \
   --total-bars 6000 --chunk-bars 1000 --jobs "${JOBS}" \
