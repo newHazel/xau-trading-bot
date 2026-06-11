@@ -516,11 +516,13 @@ def make_risk_hook(config: Optional[Dict[str, Any]] = None,
     from core.risk.take_profit import TakeProfitCalculator
     from core.risk.liquidity_target_finder import LiquidityTargetFinder
     from core.risk.position_sizer import PositionSizer
+    from core.risk.rr_calculator import RRCalculator
 
     sl_calc = StopLossCalculator(config)
     tp_calc = TakeProfitCalculator(config)
     liq_finder = LiquidityTargetFinder(config)
     sizer = PositionSizer(config, config.get("costs", config))
+    rr_calc = RRCalculator(config, config.get("costs", config))  # F1: net-of-costs R:R
     rr_min = config.get("rr_tiers", {}).get("min_to_enter", 2.0)
 
     def hook(ctx: PipelineContext, bar: Any, history: Any) -> None:
@@ -564,8 +566,17 @@ def make_risk_hook(config: Optional[Dict[str, Any]] = None,
         ctx.sl = sl_res.sl_price
         ctx.tp1 = tp_res.tp1
         ctx.tp2 = tp_res.tp2
-        ctx.net_rr = tp_res.tp2_r
-        ctx.rr_minimum_ok = tp_res.tp2_r >= rr_min
+        # F1: R:R gate + display must be NET of execution costs (spread + slippage),
+        # not raw price geometry. RRCalculator subtracts costs; rr.valid is the
+        # net >= min_to_enter gate. (Previously ctx.net_rr = tp_res.tp2_r was gross.)
+        rr = rr_calc.calculate(
+            direction=ctx.direction, entry=entry, sl=sl_res.sl_price, tp=tp_res.tp2,
+            is_news_time=not ctx.news_clear,
+            is_high_volatility=not getattr(ctx, "clean_market_state", True),
+        )
+        ctx.net_rr = rr.net_rr
+        ctx.rr_minimum_ok = rr.valid
+        ctx.extra["gross_rr"] = rr.gross_rr  # keep gross too, for display transparency
         ctx.lot_size = getattr(size, "lot_size", 0.01) if size and getattr(size, "valid", True) else 0.01
         ctx.liquidity_target_clear = liq_price is not None
         # multiple confluence booster: 2+ of OB / displacement / DXY / fresh FVG

@@ -80,3 +80,24 @@ class TestStructureHookOnTinyData:
         hook(ctx, {}, {"4h": df, "1h": df})
         # htf_bias should be set to something (string) or remain None — just no crash
         assert ctx.htf_bias is None or isinstance(ctx.htf_bias, str)
+
+
+class TestRiskHookNetRR:
+    """F1: the live risk hook's net_rr is NET of execution costs (RRCalculator), not
+    gross price geometry — and the gross value is stashed for display transparency."""
+
+    def test_net_rr_is_below_gross(self):
+        from core.engine.pipeline_hooks import make_risk_hook
+        idx = pd.date_range("2026-06-11", periods=40, freq="5min", tz="UTC")
+        df = pd.DataFrame({"open": [4000.0] * 40, "high": [4003.0] * 40,
+                           "low": [3997.0] * 40, "close": [4000.0] * 40,
+                           "volume": [100] * 40}, index=idx)
+        ctx = _ctx()
+        ctx.direction = "long"
+        ctx.sweep = {"level": 3994.0}
+        ctx.fvg = {"top": 4000.0, "bottom": 3998.0}
+        ctx.news_clear = True
+        make_risk_hook(CFG)(ctx, {"timestamp": NOW}, {"5m": df})
+        if ctx.entry is not None:                       # a trade was sized
+            assert "gross_rr" in ctx.extra
+            assert ctx.net_rr < ctx.extra["gross_rr"]   # costs strictly subtracted
