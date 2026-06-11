@@ -56,3 +56,10 @@ fvg_max_distance_atr: 4.0           # zones farther than this are heavily penali
 fvg_max_age_bars: 120              # zones older than this are heavily penalized
 fvg_repin_interval_bars: 5          # re-evaluate the pinned zone every N bars
 fvg_repin_min_improvement_points: 8.0  # only re-pin if the new zone is this much nearer
+
+# --- Entry confirmation: require a REAL rejection at the zone (#6) --------------
+# The final confirmation step requires price to TAG the pinned FVG and CLOSE BACK
+# OUT of it in-direction (a true rejection), not merely print a same-colour candle.
+# Prevents firing mid-move before price actually reaches/rejects the zone.
+# Set false to restore the legacy body-colour-only confirmation.
+require_zone_rejection: true

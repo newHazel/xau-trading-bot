@@ -184,3 +184,39 @@ class TestRepinGating:
         r._bars_since_repin = 999
         out = r._maybe_repin(self.FAR, self.NEAR, self._df(4180.0))
         assert out is self.FAR  # legacy behavior: pinned zone never swapped
+
+
+class TestZoneRejectionConfirmation:
+    """Fix #6: the confirmation step requires a REAL rejection at the pinned zone
+    (price TAGS the zone and CLOSES BACK OUT in-direction), not just a same-colour
+    candle — so it cannot fire while price is still outside/passing through the zone."""
+
+    ZONE = {"top": 4158.1, "bottom": 4154.3}  # short setup
+
+    def _df(self, o, h, l, c):
+        import pandas as pd
+        idx = pd.date_range("2026-06-10", periods=5, freq="15min", tz="UTC")
+        return {"15m": pd.DataFrame({"open": [4156.0] * 4 + [o], "high": [4157.0] * 4 + [h],
+                                     "low": [4153.0] * 4 + [l], "close": [4155.0] * 4 + [c]}, index=idx)}
+
+    def _armed(self):
+        s = _Script()
+        s.fields.update({"htf_bias": "short", "direction": "short"})
+        r = _runner(s)  # default config → require_zone_rejection True
+        r._locked_direction = "short"
+        r._captured["fvg"] = dict(self.ZONE)
+        r._captured["sweep"] = {"level": 4158}
+        r._sm.force_state(State.WAITING_FOR_CONFIRMATION_CANDLE, "test", NOW)
+        return r
+
+    def test_real_rejection_advances(self):
+        r = self._armed()
+        # short rejection: high tags zone (>=4154.3), close back below (<4154.3), bearish
+        r.on_bar(_bar(1), self._df(o=4156.0, h=4159.0, l=4150.0, c=4150.0))
+        assert r.state != State.WAITING_FOR_CONFIRMATION_CANDLE  # advanced past confirmation
+
+    def test_bearish_candle_without_tag_does_not_advance(self):
+        r = self._armed()
+        # bearish candle, but price never tags up into the zone (the body-colour trap)
+        r.on_bar(_bar(1), self._df(o=4148.0, h=4150.0, l=4145.0, c=4146.0))
+        assert r.state == State.WAITING_FOR_CONFIRMATION_CANDLE  # no real rejection → stuck

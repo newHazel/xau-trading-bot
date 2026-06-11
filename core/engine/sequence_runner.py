@@ -100,6 +100,10 @@ class SequenceRunner:
         self._repin_min_gain = float(config.get("fvg_repin_min_improvement_points", 8.0))
         self._bars_since_repin = 0
 
+        # #6: require a real rejection AT the pinned zone for the confirmation step
+        # (price tags the zone and closes back out), not just a same-colour candle.
+        self._require_zone_rejection = bool(config.get("require_zone_rejection", True))
+
     @property
     def state(self) -> State:
         return self._sm.state
@@ -131,6 +135,18 @@ class SequenceRunner:
                 rl = float(df["low"].iloc[-3:].min())
                 rh = float(df["high"].iloc[-3:].max())
                 ctx.retraced_to_zone = (rl <= hi and rh >= lo)
+                # #6: confirmation = a REAL rejection AT the pinned zone — price tagged
+                # the zone and CLOSED BACK OUT of it in-direction — not just any same-
+                # colour candle (smc_hook's c<o/c>o, which fired the 4154 short mid-move
+                # while price was still BELOW the zone). Evaluated against the PINNED zone
+                # so entry stays consistent. require_zone_rejection=false → legacy.
+                if self._require_zone_rejection:
+                    o = float(df["open"].iloc[-1]); c = float(df["close"].iloc[-1])
+                    h = float(df["high"].iloc[-1]); l = float(df["low"].iloc[-1])
+                    if self._locked_direction == "short":
+                        ctx.confirmation_candle = (h >= lo) and (c < lo) and (c < o)
+                    elif self._locked_direction == "long":
+                        ctx.confirmation_candle = (l <= hi) and (c > hi) and (c > o)
 
         # cooldown after a signal
         if self._cooldown_left > 0:

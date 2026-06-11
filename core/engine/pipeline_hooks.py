@@ -143,7 +143,20 @@ def select_fvg(candidates: list, df: pd.DataFrame, config: Dict[str, Any]) -> Op
     w_age = float(config.get("fvg_age_weight", 0.5))
     max_dist_atr = float(config.get("fvg_max_distance_atr", 4.0))
     max_age_bars = int(config.get("fvg_max_age_bars", 120))
+    dir_aware = bool(config.get("fvg_direction_aware", True))  # #1 toggle (for A/B)
     OVER = 100.0  # soft penalty for breaching a cap: deprioritize, never exclude
+
+    # Direction-awareness (#1): candidates are pre-filtered to one side, so infer it.
+    # SHORT (bearish FVG = resistance): valid zones are AT/ABOVE price (price rallies UP
+    # into them); a zone price has already risen ABOVE is "passed" → not actionable.
+    # LONG (bullish FVG = support): mirror — a zone price has already dropped BELOW is passed.
+    # Without this, _near_dist (unsigned) lets a blown near-side gap outscore a valid
+    # farther-side zone and get pinned (part of the E1 stale/wrong-zone failure).
+    _is_short = (candidates[0].get("fvg_type") == "bear")
+
+    def _wrong_side(u: Dict) -> bool:
+        lo = min(u["top"], u["bottom"]); hi = max(u["top"], u["bottom"])
+        return (price > hi) if _is_short else (price < lo)
 
     def _near_dist(u: Dict) -> float:
         lo = min(u["top"], u["bottom"]); hi = max(u["top"], u["bottom"])
@@ -170,6 +183,8 @@ def select_fvg(candidates: list, df: pd.DataFrame, config: Dict[str, Any]) -> Op
             pen += OVER
         if age > max_age_bars:
             pen += OVER
+        if dir_aware and _wrong_side(u):
+            pen += OVER  # zone on the already-passed side for this direction
         return pen
 
     return min(candidates, key=_score)
@@ -340,9 +355,19 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
             recent_high = float(df["high"].iloc[-3:].max())
             ctx.retraced_to_zone = (recent_low <= hi and recent_high >= lo)
 
+            # #6: confirmation = a REAL rejection AT the zone (tagged it, closed back
+            # OUT in-direction), not just a same-colour candle. Computed here against
+            # the freshly-selected FVG so the bar that FIRST captures the FVG (where the
+            # runner's pinned override has not run yet) is still gated correctly; on
+            # later bars the runner re-evaluates this against the PINNED zone.
             o = float(df["open"].iloc[-1])
             c = float(df["close"].iloc[-1])
-            ctx.confirmation_candle = (c > o) if is_long else (c < o)
+            if config.get("require_zone_rejection", True):
+                h = float(df["high"].iloc[-1]); lw = float(df["low"].iloc[-1])
+                ctx.confirmation_candle = (((lw <= hi) and (c > hi) and (c > o)) if is_long
+                                           else ((h >= lo) and (c < lo) and (c < o)))
+            else:
+                ctx.confirmation_candle = (c > o) if is_long else (c < o)
 
         # --- order block (needs FVG/BOS columns) ---
         ob_df = obs.detect(fvg_df)

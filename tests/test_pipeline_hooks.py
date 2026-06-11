@@ -5,7 +5,7 @@ import pandas as pd
 from datetime import datetime, timezone
 from core.engine.signal_pipeline import PipelineContext
 from core.engine.pipeline_hooks import (
-    build_default_hooks, compute_atr,
+    build_default_hooks, compute_atr, select_fvg,
     make_structure_hook, make_smc_hook, make_filter_hook,
     make_indicator_hook, make_risk_hook,
 )
@@ -80,3 +80,44 @@ class TestStructureHookOnTinyData:
         hook(ctx, {}, {"4h": df, "1h": df})
         # htf_bias should be set to something (string) or remain None — just no crash
         assert ctx.htf_bias is None or isinstance(ctx.htf_bias, str)
+
+
+class TestSelectFvgDirectionAware:
+    """Fix #1: select_fvg must prefer a correct-SIDE zone over a nearer wrong-side one
+    (a zone price has already passed is not actionable), but never drop to None."""
+
+    def _df(self, price=4180.0):
+        idx = pd.date_range("2026-06-10", periods=20, freq="5min", tz="UTC")
+        return pd.DataFrame({"open": price, "high": price + 5, "low": price - 5,
+                             "close": price, "volume": 100.0}, index=idx)
+
+    def test_short_prefers_above_price_over_nearer_passed_zone(self):
+        df = self._df(4180.0)
+        ts = df.index[-2]
+        near_passed = {"top": 4155, "bottom": 4150, "fvg_type": "bear", "confirm_ts": ts, "state": "fresh"}
+        far_valid = {"top": 4215, "bottom": 4210, "fvg_type": "bear", "confirm_ts": ts, "state": "fresh"}
+        chosen = select_fvg([near_passed, far_valid], df, {"fvg_freshness_enabled": True})
+        assert chosen is far_valid  # correct-side wins despite being farther
+
+    def test_long_prefers_below_price_over_nearer_passed_zone(self):
+        df = self._df(4180.0)
+        ts = df.index[-2]
+        near_passed = {"top": 4210, "bottom": 4205, "fvg_type": "bull", "confirm_ts": ts, "state": "fresh"}
+        far_valid = {"top": 4150, "bottom": 4145, "fvg_type": "bull", "confirm_ts": ts, "state": "fresh"}
+        chosen = select_fvg([near_passed, far_valid], df, {"fvg_freshness_enabled": True})
+        assert chosen is far_valid
+
+    def test_wrong_side_only_still_returned_as_fallback(self):
+        df = self._df(4180.0)
+        only_passed = {"top": 4155, "bottom": 4150, "fvg_type": "bear",
+                       "confirm_ts": df.index[-2], "state": "fresh"}
+        assert select_fvg([only_passed], df, {"fvg_freshness_enabled": True}) is only_passed
+
+    def test_legacy_flag_ignores_direction_scoring(self):
+        df = self._df(4180.0)
+        ts = df.index[-2]
+        near_passed = {"top": 4155, "bottom": 4150, "fvg_type": "bear", "confirm_ts": ts, "state": "fresh"}
+        far_valid = {"top": 4215, "bottom": 4210, "fvg_type": "bear", "confirm_ts": ts, "state": "fresh"}
+        # legacy = newest-first = candidates[0], regardless of side
+        chosen = select_fvg([near_passed, far_valid], df, {"fvg_freshness_enabled": False})
+        assert chosen is near_passed
