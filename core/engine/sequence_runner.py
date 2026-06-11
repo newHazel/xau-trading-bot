@@ -100,6 +100,11 @@ class SequenceRunner:
         self._repin_min_gain = float(config.get("fvg_repin_min_improvement_points", 8.0))
         self._bars_since_repin = 0
 
+        # #5 (genuine bug fix, default ON): cooldown burns only when a signal is
+        # actually SENT. A completed-but-rejected sequence should NOT mute a real
+        # follow-up for the cooldown window — it resets to hunting instead.
+        self._cooldown_after_approval_only = bool(config.get("cooldown_after_approval_only", True))
+
     @property
     def state(self) -> State:
         return self._sm.state
@@ -262,13 +267,22 @@ class SequenceRunner:
             setup_id=setup_id, indicators=indicators,
         )
 
-        # enter cooldown regardless (one shot per completed sequence)
+        grade = decision.grade.grade if decision.grade else "D"
+        approved = bool(decision.approved) and grade in self._tradeable
+
+        # #5: only burn cooldown when a signal is actually SENT. A completed-but-
+        # rejected (non-tradeable) sequence resets to hunting instead of muting a
+        # real follow-up for the cooldown window.
+        if self._cooldown_after_approval_only and not approved:
+            self._reset(now, "completed, not tradeable — no cooldown (#5)")
+            return None
+
+        # enter cooldown (one shot per emitted signal)
         self._sm.transition(State.SIGNAL_SENT, "signal evaluated", now)
         self._sm.transition(State.COOLDOWN, "post-signal cooldown", now)
         self._cooldown_left = self._cooldown_bars
 
-        grade = decision.grade.grade if decision.grade else "D"
-        if not decision.approved or grade not in self._tradeable:
+        if not approved:
             return None
 
         return PipelineSignal(

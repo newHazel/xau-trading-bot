@@ -184,3 +184,30 @@ class TestRepinGating:
         r._bars_since_repin = 999
         out = r._maybe_repin(self.FAR, self.NEAR, self._df(4180.0))
         assert out is self.FAR  # legacy behavior: pinned zone never swapped
+
+
+class TestCooldownAfterApproval:
+    """#5 (default ON): cooldown burns only when a signal is actually SENT. A
+    completed-but-rejected (non-tradeable) sequence resets to hunting instead of
+    muting a real follow-up for the cooldown window."""
+
+    REJECTED = {  # full setup but kill_zone False → completes yet is NOT tradeable
+        "htf_bias": "long", "direction": "long", "structure_15m": "long",
+        "price_zone": "discount", "sweep": {"level": 2640}, "sweep_confirmed": True,
+        "fvg_valid": True, "fvg_fresh": True, "fvg": {"top": 2648, "bottom": 2644},
+        "retraced_to_zone": True, "micro_choch": True, "confirmation_candle": True,
+        "in_kill_zone": False, "news_clear": True, "no_blocking_filters": True,
+        "daily_limits_ok": True,
+    }
+
+    def test_default_resets_after_reject_not_cooldown(self):
+        s = _Script(); s.fields.update(self.REJECTED)
+        r = _runner(s)  # #5 default ON
+        assert r.on_bar(_bar(0), {}) is None
+        assert r.state == State.WAITING_FOR_HTF_BIAS  # reset to hunting, no cooldown
+
+    def test_flag_off_restores_legacy_cooldown(self):
+        s = _Script(); s.fields.update(self.REJECTED)
+        r = SequenceRunner({**CONFIG, "cooldown_after_approval_only": False}, hooks=_hooks(s))
+        assert r.on_bar(_bar(0), {}) is None
+        assert r.state == State.COOLDOWN  # legacy: cooldown even after a reject
