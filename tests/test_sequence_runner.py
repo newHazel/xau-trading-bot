@@ -211,3 +211,39 @@ class TestCooldownAfterApproval:
         r = SequenceRunner({**CONFIG, "cooldown_after_approval_only": False}, hooks=_hooks(s))
         assert r.on_bar(_bar(0), {}) is None
         assert r.state == State.COOLDOWN  # legacy: cooldown even after a reject
+
+
+class TestMultiZone:
+    """#3: watch several candidate zones and FREEZE whichever price retraces into
+    FIRST. From that instant retrace AND entry read the single frozen zone, so the
+    08:40 entry-vs-retrace pin invariant is preserved."""
+
+    FAR = {"top": 4205.0, "bottom": 4200.0}   # short setup; price won't reach this
+    NEAR = {"top": 4158.0, "bottom": 4154.0}  # price retraces into this one
+
+    def _df(self, lo3, hi3):
+        import pandas as pd
+        idx = pd.date_range("2026-06-10", periods=3, freq="15min", tz="UTC")
+        return {"15m": pd.DataFrame({"open": [4156.0] * 3, "high": [hi3] * 3,
+                                     "low": [lo3] * 3, "close": [4156.0] * 3}, index=idx)}
+
+    def _armed(self):
+        s = _Script()
+        s.fields.update({"htf_bias": "short", "direction": "short"})
+        r = SequenceRunner({**CONFIG, "fvg_multizone": True}, hooks=_hooks(s))
+        r._locked_direction = "short"
+        r._captured["fvg"] = dict(self.FAR)  # the far one was the initial "best"
+        r._captured["fvg_candidates"] = [dict(self.FAR), dict(self.NEAR)]
+        r._sm.force_state(State.WAITING_FOR_RETRACE_TO_ZONE, "test", NOW)
+        return r
+
+    def test_freezes_first_retraced_zone(self):
+        r = self._armed()
+        r.on_bar(_bar(1), self._df(lo3=4153.0, hi3=4159.0))  # range tags NEAR, not FAR
+        assert r._captured["fvg"]["bottom"] == self.NEAR["bottom"]  # NEAR frozen as the zone
+        assert r.state != State.WAITING_FOR_RETRACE_TO_ZONE         # advanced past retrace
+
+    def test_no_zone_retraced_keeps_waiting(self):
+        r = self._armed()
+        r.on_bar(_bar(1), self._df(lo3=4160.0, hi3=4165.0))  # reaches neither zone
+        assert r.state == State.WAITING_FOR_RETRACE_TO_ZONE

@@ -324,6 +324,15 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
         ctx.fvg = chosen_fvg
         ctx.fvg_valid = chosen_fvg is not None
         ctx.fvg_fresh = chosen_fvg is not None  # unmitigated by construction
+        # #3 (multi-zone): expose the N NEAREST tradeable zones so the runner can
+        # watch several at once and fire on whichever price actually retraces into
+        # first (the "human watches multiple levels" behavior). Default off.
+        if config.get("fvg_multizone", False) and candidates:
+            price_now = float(df["close"].iloc[-1])
+            def _nd(u):
+                lo = min(u["top"], u["bottom"]); hi = max(u["top"], u["bottom"])
+                return 0.0 if lo <= price_now <= hi else min(abs(price_now - lo), abs(price_now - hi))
+            ctx.extra["fvg_candidates"] = sorted(candidates, key=_nd)[:int(config.get("fvg_multizone_n", 4))]
         if chosen_fvg is not None:
             # --- retrace into the FVG zone + confirmation candle ---
             # NOTE: ctx.retraced_to_zone here is computed against the FRESHLY

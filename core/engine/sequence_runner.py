@@ -105,6 +105,11 @@ class SequenceRunner:
         # follow-up for the cooldown window — it resets to hunting instead.
         self._cooldown_after_approval_only = bool(config.get("cooldown_after_approval_only", True))
 
+        # #3 (multi-zone, default OFF): watch the N nearest tradeable FVGs at once
+        # and FREEZE whichever price retraces into first. Disables the single-zone
+        # re-pin (multi-zone subsumes it). Flag-gated — validate before any live use.
+        self._multizone = bool(config.get("fvg_multizone", False))
+
     @property
     def state(self) -> State:
         return self._sm.state
@@ -127,15 +132,34 @@ class SequenceRunner:
             # same-direction zone (every repin_interval bars, before retrace fires).
             # Both retrace AND entry read self._captured["fvg"], so they stay
             # consistent — no 08:40-style entry-vs-retrace mismatch is reintroduced.
-            cap_fvg = self._maybe_repin(cap_fvg, fresh_fvg, history)
+            # #3: multi-zone disables the single-zone re-pin (it subsumes it).
+            if not self._multizone:
+                cap_fvg = self._maybe_repin(cap_fvg, fresh_fvg, history)
             ctx.fvg = cap_fvg
             df = history.get(self._exec_tf) if isinstance(history, dict) else None
             if df is not None and getattr(df, "empty", True) is False and len(df) >= 1:
-                lo = min(cap_fvg["top"], cap_fvg["bottom"])
-                hi = max(cap_fvg["top"], cap_fvg["bottom"])
                 rl = float(df["low"].iloc[-3:].min())
                 rh = float(df["high"].iloc[-3:].max())
-                ctx.retraced_to_zone = (rl <= hi and rh >= lo)
+                mz = (self._multizone
+                      and self._sm.state == State.WAITING_FOR_RETRACE_TO_ZONE
+                      and self._captured.get("fvg_candidates"))
+                if mz:
+                    # #3: check retrace against ALL shortlisted zones; the FIRST one
+                    # price retraces into is FROZEN as the single zone — retrace AND
+                    # entry then both read self._captured["fvg"] (08:40 pin preserved).
+                    for cand in self._captured["fvg_candidates"]:
+                        lo = min(cand["top"], cand["bottom"]); hi = max(cand["top"], cand["bottom"])
+                        if rl <= hi and rh >= lo:
+                            self._captured["fvg"] = cand
+                            ctx.fvg = cand
+                            ctx.retraced_to_zone = True
+                            break
+                    else:
+                        ctx.retraced_to_zone = False
+                else:
+                    lo = min(cap_fvg["top"], cap_fvg["bottom"])
+                    hi = max(cap_fvg["top"], cap_fvg["bottom"])
+                    ctx.retraced_to_zone = (rl <= hi and rh >= lo)
 
         # cooldown after a signal
         if self._cooldown_left > 0:
@@ -172,6 +196,9 @@ class SequenceRunner:
                 self._captured["sweep"] = ctx.sweep
             if cond_key == "fvg":
                 self._captured["fvg"] = ctx.fvg
+                if self._multizone:  # #3: remember the whole shortlist, not just one
+                    self._captured["fvg_candidates"] = (
+                        list(ctx.extra.get("fvg_candidates") or []) or [ctx.fvg])
 
         if self._sm.state == State.SIGNAL_READY:
             return self._emit(ctx, bar, history, now)
