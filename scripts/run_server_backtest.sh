@@ -10,9 +10,28 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)"
+# nproc reports the HOST cores on a shared container (e.g. 48) → a Pool that big
+# oversubscribes the few REAL vCPUs and thrashes/OOMs with no progress. Detect the
+# real CPU quota from cgroup (v2 then v1), fall back to nproc, and HARD-cap at 6.
+detect_cpus() {
+  if [ -r /sys/fs/cgroup/cpu.max ]; then
+    read -r q p < /sys/fs/cgroup/cpu.max 2>/dev/null || true
+    if [ "${q:-max}" != "max" ] && [ "${p:-0}" -gt 0 ] 2>/dev/null; then
+      echo $(( (q + p - 1) / p )); return; fi
+  fi
+  if [ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us ]; then
+    q=$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null)
+    p=$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null)
+    if [ "${q:-0}" -gt 0 ] 2>/dev/null && [ "${p:-0}" -gt 0 ] 2>/dev/null; then
+      echo $(( (q + p - 1) / p )); return; fi
+  fi
+  nproc 2>/dev/null || echo 2
+}
+JOBS="$(detect_cpus)"
+[ "${JOBS:-0}" -lt 1 ] 2>/dev/null && JOBS=2
+[ "${JOBS}" -gt 6 ] 2>/dev/null && JOBS=6   # cap: avoid oversubscription / OOM
 echo "=================================================================="
-echo "  SERVER BACKTEST  |  cores=${JOBS}"
+echo "  SERVER BACKTEST  |  real cores -> JOBS=${JOBS}  (nproc reported $(nproc 2>/dev/null))"
 echo "=================================================================="
 
 echo ">>> [1/4] fetching per-TF (HTF first) with 65s gaps to respect 8 req/min"
@@ -42,9 +61,10 @@ echo ">>> [3/4] verifying the parallel backtest tool (chunked == sequential)"
 python -u scripts/backtest_sequence_parallel.py --verify --jobs "${JOBS}" || {
   echo "VERIFY FAILED — not trusting parallel numbers"; sleep 3600; exit 1; }
 
-echo ">>> [4/4] running ablation: baseline -> freshness -> all (~8000 bars / ~6 weeks)"
+echo ">>> [4/4] running ablation: baseline -> freshness -> all (~6000 bars / ~4 weeks)"
+echo "    (small chunks -> watch chunks finish ONE BY ONE as progress)"
 python -u scripts/backtest_sequence_parallel.py \
-  --total-bars 8000 --chunk-bars 2000 --jobs "${JOBS}" \
+  --total-bars 6000 --chunk-bars 1000 --jobs "${JOBS}" \
   --variants baseline,freshness,all
 
 echo "=================================================================="
