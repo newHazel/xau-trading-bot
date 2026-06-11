@@ -161,16 +161,8 @@ class FVGValidator:
         lows:   np.ndarray,
         closes: np.ndarray,
     ) -> np.ndarray:
-        n = len(highs)
-        tr = np.empty(n)
-        tr[0] = highs[0] - lows[0]
-        for i in range(1, n):
-            tr[i] = max(
-                highs[i] - lows[i],
-                abs(highs[i] - closes[i - 1]),
-                abs(lows[i]  - closes[i - 1]),
-            )
-        return pd.Series(tr).rolling(self._atr_period, min_periods=1).mean().to_numpy()
+        from core.smc.atr_util import rolling_atr  # F12: vectorized, identical output
+        return rolling_atr(highs, lows, closes, self._atr_period)
 
     # ---------------------------------------------------------------- #
     # Validation                                                         #
