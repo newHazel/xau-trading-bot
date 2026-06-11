@@ -220,3 +220,30 @@ class TestZoneRejectionConfirmation:
         # bearish candle, but price never tags up into the zone (the body-colour trap)
         r.on_bar(_bar(1), self._df(o=4148.0, h=4150.0, l=4145.0, c=4146.0))
         assert r.state == State.WAITING_FOR_CONFIRMATION_CANDLE  # no real rejection → stuck
+
+
+class TestCooldownAfterApproval:
+    """#5: cooldown should only burn when a signal is actually SENT. A completed-but-
+    rejected (non-tradeable) sequence must reset to hunting, not mute a real follow-up."""
+
+    # full setup but kill_zone False → completes the sequence yet is NOT tradeable
+    REJECTED = {
+        "htf_bias": "long", "direction": "long", "structure_15m": "long",
+        "price_zone": "discount", "sweep": {"level": 2640}, "sweep_confirmed": True,
+        "fvg_valid": True, "fvg_fresh": True, "fvg": {"top": 2648, "bottom": 2644},
+        "retraced_to_zone": True, "micro_choch": True, "confirmation_candle": True,
+        "in_kill_zone": False, "news_clear": True, "no_blocking_filters": True,
+        "daily_limits_ok": True,
+    }
+
+    def test_legacy_cooldown_after_reject(self):
+        s = _Script(); s.fields.update(self.REJECTED)
+        r = _runner(s)  # flag off (default)
+        assert r.on_bar(_bar(0), {}) is None
+        assert r.state == State.COOLDOWN  # legacy: burns cooldown even on a reject
+
+    def test_flag_on_no_cooldown_after_reject(self):
+        s = _Script(); s.fields.update(self.REJECTED)
+        r = SequenceRunner({**CONFIG, "cooldown_after_approval_only": True}, hooks=_hooks(s))
+        assert r.on_bar(_bar(0), {}) is None
+        assert r.state == State.WAITING_FOR_HTF_BIAS  # #5: reset to hunting, no cooldown

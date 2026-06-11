@@ -61,11 +61,12 @@ echo ">>> [3/4] verifying the parallel backtest tool (chunked == sequential)"
 python -u scripts/backtest_sequence_parallel.py --verify --jobs "${JOBS}" || {
   echo "VERIFY FAILED — not trusting parallel numbers"; sleep 3600; exit 1; }
 
-echo ">>> [4/4] running ablation: baseline -> freshness -> all (~6000 bars / ~4 weeks)"
+echo ">>> [4/4] running ablation: baseline -> freshness -> boost (~6000 bars / ~4 weeks)"
+echo "    boost = freshness + #5 (cooldown-after-approval) + #8 (kill-zone-at-sweep)"
 echo "    (small chunks -> watch chunks finish ONE BY ONE as progress)"
 python -u scripts/backtest_sequence_parallel.py \
   --total-bars 6000 --chunk-bars 1000 --jobs "${JOBS}" \
-  --variants baseline,freshness,all
+  --variants baseline,freshness,boost
 
 echo "=================================================================="
 echo "  DONE — copy the ABLATION RESULT table above, then DELETE this service."

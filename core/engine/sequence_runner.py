@@ -104,6 +104,14 @@ class SequenceRunner:
         # (price tags the zone and closes back out), not just a same-colour candle.
         self._require_zone_rejection = bool(config.get("require_zone_rejection", True))
 
+        # Signal-boosters (default OFF → live unchanged until validated):
+        # #5: only burn cooldown when a signal is actually SENT (a rejected completion
+        #     shouldn't mute a real follow-up). #8: capture the kill-zone truth at the
+        #     SWEEP bar, so an in-session setup that completes just after the kill zone
+        #     closes is not dropped.
+        self._cooldown_after_approval_only = bool(config.get("cooldown_after_approval_only", False))
+        self._capture_killzone_at_sweep = bool(config.get("capture_killzone_at_sweep", False))
+
     @property
     def state(self) -> State:
         return self._sm.state
@@ -181,6 +189,8 @@ class SequenceRunner:
                 self._bars_in_setup = 0
             if cond_key == "sweep":
                 self._captured["sweep"] = ctx.sweep
+                if self._capture_killzone_at_sweep:
+                    self._captured["in_kill_zone"] = bool(ctx.in_kill_zone)  # #8
             if cond_key == "fvg":
                 self._captured["fvg"] = ctx.fvg
 
@@ -256,13 +266,19 @@ class SequenceRunner:
             self._reset(now, "risk could not size the setup")
             return None
 
+        # #8: use the kill-zone truth captured at the SWEEP bar if enabled, so an
+        # in-session setup that completes just after the kill zone closes isn't dropped.
+        kill_zone = ctx.in_kill_zone
+        if self._capture_killzone_at_sweep and "in_kill_zone" in self._captured:
+            kill_zone = self._captured["in_kill_zone"]
+
         # sequence conditions are TRUE (we tracked them); gates checked now.
         mandatory = {
             "htf_bias": True, "15m_aligned": True, "price_zone": True,
             "sweep": True, "sweep_confirmation": True,
             "fvg_valid": True, "fvg_freshness": True,
             "retrace_to_zone": True, "micro_choch": True, "confirmation_candle": True,
-            "kill_zone": ctx.in_kill_zone,
+            "kill_zone": kill_zone,
             "news_clear": ctx.news_clear,
             "rr_minimum": ctx.rr_minimum_ok,
             "daily_limits_ok": ctx.daily_limits_ok,
@@ -278,13 +294,22 @@ class SequenceRunner:
             setup_id=setup_id, indicators=indicators,
         )
 
-        # enter cooldown regardless (one shot per completed sequence)
+        grade = decision.grade.grade if decision.grade else "D"
+        approved = bool(decision.approved) and grade in self._tradeable
+
+        # #5: only burn cooldown when a signal is actually SENT. A completed-but-
+        # rejected (non-tradeable) sequence shouldn't mute a real follow-up — reset to
+        # hunting instead. Legacy (flag off): cooldown after EVERY completion.
+        if self._cooldown_after_approval_only and not approved:
+            self._reset(now, "completed, not tradeable — no cooldown (#5)")
+            return None
+
+        # enter cooldown (one shot per emitted signal / per completion in legacy)
         self._sm.transition(State.SIGNAL_SENT, "signal evaluated", now)
         self._sm.transition(State.COOLDOWN, "post-signal cooldown", now)
         self._cooldown_left = self._cooldown_bars
 
-        grade = decision.grade.grade if decision.grade else "D"
-        if not decision.approved or grade not in self._tradeable:
+        if not approved:
             return None
 
         return PipelineSignal(

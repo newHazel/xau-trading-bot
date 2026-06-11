@@ -50,6 +50,10 @@ VARIANTS = {
     "baseline":  {"fvg_freshness_enabled": False, "require_zone_rejection": False},
     "freshness": {"fvg_freshness_enabled": True,  "fvg_direction_aware": False, "require_zone_rejection": False},
     "all":       {"fvg_freshness_enabled": True,  "fvg_direction_aware": True,  "require_zone_rejection": True},
+    # signal-boosters on top of the winning "freshness" config (#5 cooldown-after-
+    # approval + #8 kill-zone-at-sweep) — do they ADD signals while keeping PF up?
+    "boost":     {"fvg_freshness_enabled": True,  "fvg_direction_aware": False, "require_zone_rejection": False,
+                  "cooldown_after_approval_only": True, "capture_killzone_at_sweep": True},
 }
 
 
@@ -197,12 +201,18 @@ def main():
         else:
             print(f"  {v:<12}{len(by[v]):>9}{m.win_rate*100:>8.1f}{m.profit_factor:>7.2f}"
                   f"{m.expectancy:>9.3f}{m.total_r:>9.1f}{m.max_drawdown_r:>8.1f}")
-    if metrics.get("freshness") and metrics.get("all"):
-        f, al = metrics["freshness"], metrics["all"]
-        d = al.total_r - f.total_r
-        print(f"\n  → #1+#6 effect (all vs freshness): total R {al.total_r:+.1f} vs {f.total_r:+.1f} "
-              f"({d:+.1f}R), PF {al.profit_factor:.2f} vs {f.profit_factor:.2f}")
-        print(f"  → #1+#6 {'EARN their keep' if d >= 0 and al.profit_factor >= f.profit_factor else 'do NOT clearly help on this sample'}.")
+    # compare every treatment variant against the live winner "freshness"
+    f = metrics.get("freshness")
+    if f:
+        for v in variants:
+            if v in ("baseline", "freshness") or not metrics.get(v):
+                continue
+            t = metrics[v]
+            n_f = len(by["freshness"]); n_t = len(by[v])
+            helps = (t.total_r >= f.total_r and t.profit_factor >= f.profit_factor)
+            print(f"\n  → {v} vs freshness: signals {n_t} vs {n_f} | "
+                  f"total R {t.total_r:+.1f} vs {f.total_r:+.1f} | PF {t.profit_factor:.2f} vs {f.profit_factor:.2f}")
+            print(f"  → {v} {'EARNS its keep (more/equal signals, PF holds) — consider deploying' if helps else 'does NOT clearly help on this sample — keep freshness'}.")
 
 
 if __name__ == "__main__":
