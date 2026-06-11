@@ -247,3 +247,11 @@ class TestMultiZone:
         r = self._armed()
         r.on_bar(_bar(1), self._df(lo3=4160.0, hi3=4165.0))  # reaches neither zone
         assert r.state == State.WAITING_FOR_RETRACE_TO_ZONE
+
+    def test_wide_bar_freezes_nearest_not_first_in_list(self):
+        # candidates ordered [FAR, NEAR]; a wide bar straddles BOTH. The close sits in
+        # NEAR, so NEAR (nearest to price) must freeze — not FAR (first in the list).
+        r = self._armed()
+        r.on_bar(_bar(1), self._df(lo3=4150.0, hi3=4210.0))  # range overlaps FAR and NEAR
+        assert r._captured["fvg"]["bottom"] == self.NEAR["bottom"]
+        assert r.state != State.WAITING_FOR_RETRACE_TO_ZONE

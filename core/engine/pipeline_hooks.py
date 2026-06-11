@@ -332,7 +332,12 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
             def _nd(u):
                 lo = min(u["top"], u["bottom"]); hi = max(u["top"], u["bottom"])
                 return 0.0 if lo <= price_now <= hi else min(abs(price_now - lo), abs(price_now - hi))
-            ctx.extra["fvg_candidates"] = sorted(candidates, key=_nd)[:int(config.get("fvg_multizone_n", 4))]
+            n = max(int(config.get("fvg_multizone_n", 4)), 1)
+            ranked = sorted(candidates, key=_nd)
+            # always keep the gate-validated zone (chosen_fvg) in the watched shortlist,
+            # so the eventual entry zone is never one the fvg gate didn't validate.
+            ctx.extra["fvg_candidates"] = ([chosen_fvg]
+                + [u for u in ranked if u is not chosen_fvg])[:n]
         if chosen_fvg is not None:
             # --- retrace into the FVG zone + confirmation candle ---
             # NOTE: ctx.retraced_to_zone here is computed against the FRESHLY

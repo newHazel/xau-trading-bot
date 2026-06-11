@@ -144,16 +144,22 @@ class SequenceRunner:
                       and self._sm.state == State.WAITING_FOR_RETRACE_TO_ZONE
                       and self._captured.get("fvg_candidates"))
                 if mz:
-                    # #3: check retrace against ALL shortlisted zones; the FIRST one
-                    # price retraces into is FROZEN as the single zone — retrace AND
-                    # entry then both read self._captured["fvg"] (08:40 pin preserved).
+                    # #3: among shortlisted zones THIS bar's range touched, FREEZE the
+                    # one NEAREST to current price (not merely first-in-list) — so a wide
+                    # bar straddling several zones picks the actionable near one. From then
+                    # retrace AND entry both read self._captured["fvg"] (08:40 pin kept).
+                    price = float(df["close"].iloc[-1])
+                    frozen, best_d = None, None
                     for cand in self._captured["fvg_candidates"]:
                         lo = min(cand["top"], cand["bottom"]); hi = max(cand["top"], cand["bottom"])
-                        if rl <= hi and rh >= lo:
-                            self._captured["fvg"] = cand
-                            ctx.fvg = cand
-                            ctx.retraced_to_zone = True
-                            break
+                        if rl <= hi and rh >= lo:  # this bar's range overlaps the zone
+                            d = 0.0 if lo <= price <= hi else min(abs(price - lo), abs(price - hi))
+                            if best_d is None or d < best_d:
+                                best_d, frozen = d, cand
+                    if frozen is not None:
+                        self._captured["fvg"] = frozen
+                        ctx.fvg = frozen
+                        ctx.retraced_to_zone = True
                     else:
                         ctx.retraced_to_zone = False
                 else:
