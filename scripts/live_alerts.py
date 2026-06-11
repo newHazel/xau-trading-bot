@@ -81,7 +81,8 @@ def main() -> None:
 
     engine = LiveAlertEngine(
         config=config,
-        live=LiveConfig(symbol=args.symbol, execution_tf=args.execution_tf),
+        live=LiveConfig(symbol=args.symbol, execution_tf=args.execution_tf,
+                        account_balance=float(config.get("account_balance", 10000.0))),
         fetcher=fetcher,
         sender=sender,
         signal_logger=SignalLogger(db),

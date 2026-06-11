@@ -1,3 +1,6 @@
+# F10: account size used to size the suggested lot in alerts. Set this to YOUR real
+# balance so the lot_size shown is correct for your account (alerts only — no auto-trade).
+account_balance: 10000.0
 risk_per_trade_percent: 0.5
 max_risk_per_trade_percent: 1.0
 max_daily_losses: 2
