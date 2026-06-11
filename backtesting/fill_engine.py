@@ -174,11 +174,12 @@ class FillEngine:
 
     def _create_tp1_fill(self, pos: OpenPosition, bar_index: int) -> FillResult:
         close_lots = pos.remaining_lots * self._tp1_close_pct
-        if pos.direction == "long":
-            fill_price = pos.tp1_price
+        slip = self._slippage  # F2: TP fills include slippage too — symmetric with SL,
+        if pos.direction == "long":   # so winners' R is net-of-slippage, not gross.
+            fill_price = pos.tp1_price - slip
             gross_pnl = (fill_price - pos.entry_price) * close_lots
         else:
-            fill_price = pos.tp1_price
+            fill_price = pos.tp1_price + slip
             gross_pnl = (pos.entry_price - fill_price) * close_lots
 
         costs = pos.costs_per_lot * close_lots
@@ -192,11 +193,12 @@ class FillEngine:
                           f"TP1 hit at {fill_price:.2f}, closed {close_lots:.2f} lots")
 
     def _create_tp2_fill(self, pos: OpenPosition, bar_index: int) -> FillResult:
+        slip = self._slippage  # F2: TP fills include slippage too (symmetric with SL)
         if pos.direction == "long":
-            fill_price = pos.tp2_price
+            fill_price = pos.tp2_price - slip
             gross_pnl = (fill_price - pos.entry_price) * pos.remaining_lots
         else:
-            fill_price = pos.tp2_price
+            fill_price = pos.tp2_price + slip
             gross_pnl = (pos.entry_price - fill_price) * pos.remaining_lots
 
         costs = pos.costs_per_lot * pos.remaining_lots
