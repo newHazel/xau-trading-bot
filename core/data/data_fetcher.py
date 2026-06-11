@@ -88,7 +88,9 @@ class DataFetcher(ABC):
             raise ValueError(f"[{source}] Index must be DatetimeIndex")
         if df.index.tz is None:
             raise ValueError(f"[{source}] Index must be tz-aware (UTC)")
-        if df.index.tz.zone != "UTC":  # type: ignore[union-attr]
+        # F5: tz-implementation-agnostic — pytz.UTC has .zone but datetime.timezone.utc
+        # does NOT (AttributeError crash on oanda/yfinance indexes). str() == "UTC" for both.
+        if str(df.index.tz) != "UTC":
             raise ValueError(f"[{source}] Index timezone must be UTC, got {df.index.tz}")
         if df.empty:
             raise ValueError(f"[{source}] DataFrame is empty")

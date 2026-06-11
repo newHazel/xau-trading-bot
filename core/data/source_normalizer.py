@@ -287,6 +287,14 @@ def validate_time_continuity(
     end   = df.index[-1]
 
     expected_idx = pd.date_range(start=start, end=end, freq=offset, tz="UTC")
+    # F6: XAU/forex markets close Fri ~21:00 UTC → Sun ~22:00 UTC. Counting those
+    # closed hours as "missing" wrongly flags clean multi-day data NOT_USABLE. Exclude
+    # the weekend-closed window so `missing` reflects only true intraday gaps.
+    _wd = expected_idx.weekday  # Mon=0 .. Sat=5, Sun=6
+    _closed = ((_wd == 5)
+               | ((_wd == 4) & (expected_idx.hour >= 21))
+               | ((_wd == 6) & (expected_idx.hour < 22)))
+    expected_idx = expected_idx[~_closed]
     actual_set   = set(df.index)
     missing      = [ts for ts in expected_idx if ts not in actual_set]
 
