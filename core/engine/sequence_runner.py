@@ -91,6 +91,9 @@ class SequenceRunner:
         self._locked_direction: Optional[str] = None
         self._captured: Dict[str, Any] = {}
         self._counter = 0
+        # near-miss telemetry: the most recent COMPLETED-but-REJECTED setup (full
+        # sequence done, failed an at-entry gate). Lets the live bot show WHAT it filters.
+        self._last_near_miss: Optional[Dict[str, Any]] = None
 
         # Periodic re-pin of the captured FVG: prefer fresh+near zones, never stay
         # stuck on a stale/far gap waiting for an impossible retrace (the 2026-06-10
@@ -109,9 +112,32 @@ class SequenceRunner:
     def state(self) -> State:
         return self._sm.state
 
+    @property
+    def last_near_miss(self) -> Optional[Dict[str, Any]]:
+        """The most recent completed-but-rejected setup on the last bar (or None)."""
+        return self._last_near_miss
+
+    # human labels for the at-entry gate that blocked an otherwise-complete setup
+    _GATE_LABELS = {
+        "kill_zone": "off kill-zone", "news_clear": "news window",
+        "rr_minimum": "R:R < 2 net", "daily_limits_ok": "daily limit",
+        "no_blocking_filters": "blocking filter",
+    }
+
+    def _note_near_miss(self, ctx: PipelineContext, mandatory: Dict[str, Any],
+                        grade: str, now: datetime) -> None:
+        failed = [self._GATE_LABELS[k] for k, v in mandatory.items()
+                  if not v and k in self._GATE_LABELS]
+        reason = " + ".join(failed) if failed else f"grade {grade} (below B)"
+        self._last_near_miss = {
+            "reason": reason, "grade": grade, "direction": ctx.direction,
+            "entry": ctx.entry, "rr": ctx.net_rr, "timestamp": now,
+        }
+
     # ------------------------------------------------------------------ #
 
     def on_bar(self, bar: Any, history: Any) -> Optional[PipelineSignal]:
+        self._last_near_miss = None  # reset per bar; _emit sets it on a rejected setup
         ctx = self._populate(bar, history)
         now = ctx.timestamp
 
@@ -274,6 +300,7 @@ class SequenceRunner:
         # rejected (non-tradeable) sequence resets to hunting instead of muting a
         # real follow-up for the cooldown window.
         if self._cooldown_after_approval_only and not approved:
+            self._note_near_miss(ctx, mandatory, grade, now)
             self._reset(now, "completed, not tradeable — no cooldown (#5)")
             return None
 

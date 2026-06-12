@@ -211,3 +211,31 @@ class TestCooldownAfterApproval:
         r = SequenceRunner({**CONFIG, "cooldown_after_approval_only": False}, hooks=_hooks(s))
         assert r.on_bar(_bar(0), {}) is None
         assert r.state == State.COOLDOWN  # legacy: cooldown even after a reject
+
+
+class TestNearMiss:
+    """A completed setup rejected only at the kill-zone gate is recorded as a
+    near-miss with the blocking reason; an INCOMPLETE setup is not."""
+
+    OFF_KILLZONE = {
+        "htf_bias": "long", "direction": "long", "structure_15m": "long",
+        "price_zone": "discount", "sweep": {"level": 2640}, "sweep_confirmed": True,
+        "fvg_valid": True, "fvg_fresh": True, "fvg": {"top": 2648, "bottom": 2644},
+        "retraced_to_zone": True, "micro_choch": True, "confirmation_candle": True,
+        "in_kill_zone": False, "news_clear": True, "no_blocking_filters": True,
+        "daily_limits_ok": True,
+    }
+
+    def test_completed_but_off_killzone_is_near_miss(self):
+        s = _Script(); s.fields.update(self.OFF_KILLZONE)
+        r = _runner(s)
+        assert r.on_bar(_bar(0), {}) is None         # rejected, no signal
+        nm = r.last_near_miss
+        assert nm is not None and "kill-zone" in nm["reason"]
+        assert nm["direction"] == "long"
+
+    def test_incomplete_setup_is_not_a_near_miss(self):
+        s = _Script(); s.fields.update({"htf_bias": "long", "direction": "long"})
+        r = _runner(s)
+        r.on_bar(_bar(0), {})
+        assert r.last_near_miss is None              # sequence never completed

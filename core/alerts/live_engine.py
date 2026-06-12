@@ -24,6 +24,7 @@ from core.alerts.telegram_sender import TelegramSender
 from core.monitoring.telegram_dedup import TelegramDedup
 from core.monitoring.heartbeat import HeartbeatManager
 from core.alerts.outcome_tracker import OutcomeTracker
+from core.alerts.near_miss_tracker import NearMissTracker
 
 DEFAULT_TFS = ["4h", "1h", "15m", "5m"]
 
@@ -71,6 +72,8 @@ class LiveAlertEngine:
         # forward paper-trade measurement (no effect on signals) — records each alert
         # and resolves it WIN/LOSS so we accumulate a real forward win%/PF/R record.
         self._tracker = OutcomeTracker()
+        # near-miss telemetry: completed setups the bot REJECTED at a gate (+ why)
+        self._near_miss = NearMissTracker()
         self._hb = HeartbeatManager({"interval_minutes": live.heartbeat_minutes, "enabled": True})
         self._hb_started = False
         self._alerts_sent = 0
@@ -140,6 +143,12 @@ class LiveAlertEngine:
             "symbol": self._live.symbol,
         }
         sig = self._runner.on_bar(bar, history)
+        nm = getattr(self._runner, "last_near_miss", None)
+        if nm is not None:
+            try:  # telemetry only — must never break the alert path
+                self._near_miss.record(nm, self._sender)
+            except Exception:
+                pass
         if sig is None or not sig.approved or sig.grade not in self._live.tradeable_grades:
             return None
 
@@ -174,8 +183,9 @@ class LiveAlertEngine:
         if self._hb.is_due(now):
             msg = self._hb.generate(state, health, self._trades_today, now)
             text = msg.format_telegram()
-            try:  # show the running forward record in the heartbeat (measurement only)
+            try:  # show the running forward record + near-miss tally (measurement only)
                 text += "\n\n📊 " + self._tracker.summary_line()
+                text += "\n⚪ " + self._near_miss.summary_line()
             except Exception:
                 pass
             self._sender.send(text)
