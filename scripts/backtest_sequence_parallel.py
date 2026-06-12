@@ -64,6 +64,14 @@ VARIANTS = {
     # case. Catches grabs faster BUT can fire on breakouts; does the net help?
     "sweep_early": {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
                     "sweep_early": True},
+    # --- "loosen the brakes" experiment (vs the live freshness baseline) ---
+    # rr_15: accept R:R down to 1.5 net (live floor is 2.0) → the marginal-R:R setups.
+    "rr_15":      {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
+                   "rr_tiers": {"min_to_enter": 1.5}},
+    # no_killzone: ignore the kill-zone gate (trade ANY session) → the single biggest
+    # filter removed. Shows how much frequency the kill-zone costs AND what it saves (PF).
+    "no_killzone": {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
+                    "ignore_kill_zone": True},
 }
 
 
@@ -91,7 +99,8 @@ def _gen_chunk(task):
     full = {tf: _load(db, symbol, tf) for tf in _TFS}
     exec_df = full[exec_tf]
     cfg = dict(assemble_pipeline_config("config"))
-    cfg.update(overrides)
+    for _k, _v in overrides.items():  # one-level deep-merge so e.g. rr_tiers isn't clobbered
+        cfg[_k] = {**cfg[_k], **_v} if isinstance(_v, dict) and isinstance(cfg.get(_k), dict) else _v
     runner = SequenceRunner(cfg, execution_tf=exec_tf, account_balance=10000.0,
                             tradeable_grades=("A+", "A", "B"))
     feed_start = max(window, real_start - warmup)

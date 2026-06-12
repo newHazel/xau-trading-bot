@@ -239,3 +239,11 @@ class TestNearMiss:
         r = _runner(s)
         r.on_bar(_bar(0), {})
         assert r.last_near_miss is None              # sequence never completed
+
+    def test_ignore_kill_zone_bypasses_the_gate(self):
+        # same off-kill-zone setup, but with the experiment flag the gate no longer blocks
+        s = _Script(); s.fields.update(self.OFF_KILLZONE)
+        r = SequenceRunner({**CONFIG, "ignore_kill_zone": True}, hooks=_hooks(s))
+        sig = r.on_bar(_bar(0), {})
+        nm = r.last_near_miss
+        assert sig is not None or (nm is not None and "kill-zone" not in nm["reason"])

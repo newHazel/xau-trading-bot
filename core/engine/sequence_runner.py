@@ -108,6 +108,11 @@ class SequenceRunner:
         # follow-up for the cooldown window — it resets to hunting instead.
         self._cooldown_after_approval_only = bool(config.get("cooldown_after_approval_only", True))
 
+        # EXPERIMENT knob (default OFF → live unchanged): treat the kill-zone gate as
+        # always satisfied, i.e. allow setups in any session. For backtesting how much
+        # the kill-zone filter actually costs/saves. NOT for live use without validation.
+        self._ignore_kill_zone = bool(config.get("ignore_kill_zone", False))
+
     @property
     def state(self) -> State:
         return self._sm.state
@@ -277,7 +282,7 @@ class SequenceRunner:
             "sweep": True, "sweep_confirmation": True,
             "fvg_valid": True, "fvg_freshness": True,
             "retrace_to_zone": True, "micro_choch": True, "confirmation_candle": True,
-            "kill_zone": ctx.in_kill_zone,
+            "kill_zone": ctx.in_kill_zone or self._ignore_kill_zone,
             "news_clear": ctx.news_clear,
             "rr_minimum": ctx.rr_minimum_ok,
             "daily_limits_ok": ctx.daily_limits_ok,

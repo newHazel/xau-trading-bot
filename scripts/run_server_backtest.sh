@@ -61,19 +61,18 @@ echo ">>> [3/4] verifying the parallel backtest tool (chunked == sequential)"
 python -u scripts/backtest_sequence_parallel.py --verify --jobs "${JOBS}" || {
   echo "VERIFY FAILED — not trusting parallel numbers"; sleep 3600; exit 1; }
 
-echo ">>> [4/4] backtest the HARDENED LIVE config (freshness + #5 + F1 net-R:R) per TF"
-echo "    each exec TF uses ALL available data (~4 months) for a bigger sample;"
-echo "    reports SIGNALS, SIGNALS/MONTH, win%, PF, total R. ~6x faster now (F12)."
-for TF in 5m 15m 1h; do
-  echo ""
-  echo "################  execution_tf = ${TF}  ################"
-  python -u scripts/backtest_sequence_parallel.py \
-    --execution-tf "${TF}" --total-bars 30000 --chunk-bars 1500 --jobs "${JOBS}" \
-    --variants freshness || echo "  (${TF} run failed — continuing)"
-done
+echo ">>> [4/4] LOOSEN-THE-BRAKES experiment on 5m (the live TF, ~6 weeks sample)"
+echo "    freshness   = current LIVE config (baseline, PF ~3.1)"
+echo "    rr_15       = accept R:R down to 1.5 net (live floor is 2.0)"
+echo "    no_killzone = ignore the kill-zone gate (trade ANY session) — biggest brake off"
+echo "    KEY: each prints sig/mo + win%/PF/R, and a 'X vs freshness' verdict line."
+python -u scripts/backtest_sequence_parallel.py \
+  --execution-tf 5m --total-bars 18000 --chunk-bars 1500 --jobs "${JOBS}" \
+  --variants freshness,rr_15,no_killzone
 
 echo "=================================================================="
-echo "  DONE — copy the 3 BACKTEST RESULT tables (5m / 15m / 1h) above."
-echo "  This is the HARDENED live config. Then DELETE this service."
+echo "  DONE — copy the BACKTEST RESULT table + the 'vs freshness' lines."
+echo "  Loosening EARNS its keep only if it adds signals AND PF stays >= freshness."
+echo "  Then DELETE this service."
 echo "=================================================================="
 sleep 10800  # keep the container alive 3h so the logs remain readable
