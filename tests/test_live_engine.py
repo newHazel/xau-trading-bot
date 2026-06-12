@@ -110,6 +110,33 @@ class TestHeartbeat:
         eng.maybe_heartbeat(now=NOW)                        # startup
         assert eng.maybe_heartbeat(now=NOW + timedelta(minutes=10)) is False
 
+    def test_heartbeat_survives_html_special_chars_in_near_miss(self):
+        # Regression: a near-miss reason like "R:R < 2 net" contains '<'. When the
+        # heartbeat embedded it and sent with parse_mode="HTML", Telegram rejected the
+        # whole message and the heartbeat silently stopped. The heartbeat must go out
+        # as plain text so a stray '<' can never kill it.
+        class _HtmlStrictSender:
+            def __init__(self): self.sent = []
+            @property
+            def is_configured(self): return True
+            def send(self, text, parse_mode="HTML"):
+                # mimic Telegram: in HTML mode an unescaped '<' is a parse error → drop
+                if parse_mode == "HTML" and "<" in text:
+                    return False
+                self.sent.append((text, parse_mode))
+                return True
+
+        sender = _HtmlStrictSender()
+        eng = _engine(sender=sender)
+        eng._near_miss.record({"reason": "R:R < 2 net", "grade": "B",
+                               "direction": "long"})           # most common rejection
+        sent = eng.maybe_heartbeat(now=NOW)
+        assert sent is True
+        assert len(sender.sent) == 1                            # delivered, not dropped
+        text, parse_mode = sender.sent[0]
+        assert parse_mode == ""                                 # plain text, no HTML
+        assert "R:R < 2 net" in text
+
 
 class TestRunCycle:
     def test_run_cycle_no_crash(self):

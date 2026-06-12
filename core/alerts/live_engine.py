@@ -188,7 +188,11 @@ class LiveAlertEngine:
                 text += "\n⚪ " + self._near_miss.summary_line()
             except Exception:
                 pass
-            self._sender.send(text)
+            # Plain text: the heartbeat carries no markup, and it embeds free-form
+            # strings (near-miss reasons like "R:R < 2 net") that contain HTML-special
+            # chars. Sending as HTML lets a stray '<' make Telegram reject the whole
+            # message, which silently kills the heartbeat. parse_mode="" = no parsing.
+            self._sender.send(text, parse_mode="")
             return True
         return False
 

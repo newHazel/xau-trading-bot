@@ -14,6 +14,7 @@ Measurement only — it changes no signal logic.
 
 from __future__ import annotations
 
+import html
 from typing import Any, Dict, Optional
 
 
@@ -44,8 +45,14 @@ class NearMissTracker:
         rr = nm.get("rr")
         ep = f" @ {entry:.2f}" if isinstance(entry, (int, float)) else ""
         rrp = f", R:R {rr:.1f}" if isinstance(rr, (int, float)) else ""
-        text = (f"⚪ <b>Near-miss</b> — {nm.get('grade', '?')} {nm.get('direction', '?')}{ep} "
-                f"completed but skipped: <b>{nm.get('reason', '?')}</b>{rrp}")
+        # This message uses HTML, but reason/grade/direction are free-form (e.g. the
+        # reason "R:R < 2 net" contains a '<'). Escape them so Telegram's HTML parser
+        # doesn't reject the whole message and silently drop the note.
+        grade = html.escape(str(nm.get("grade", "?")))
+        direction = html.escape(str(nm.get("direction", "?")))
+        reason = html.escape(str(nm.get("reason", "?")))
+        text = (f"⚪ <b>Near-miss</b> — {grade} {direction}{ep} "
+                f"completed but skipped: <b>{reason}</b>{rrp}")
         try:
             sender.send(text)
         except Exception:
