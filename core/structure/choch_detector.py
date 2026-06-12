@@ -72,15 +72,10 @@ class CHoCHDetector:
         result = df_with_structure.copy()
         n = len(result)
 
-        result["choch_bull"]         = np.nan
-        result["choch_bear"]         = np.nan
-        result["choch_bull_ref_bar"] = -1
-        result["choch_bear_ref_bar"] = -1
-
-        col_cb  = result.columns.get_loc("choch_bull")
-        col_cr  = result.columns.get_loc("choch_bear")
-        col_cbr = result.columns.get_loc("choch_bull_ref_bar")
-        col_crr = result.columns.get_loc("choch_bear_ref_bar")
+        a_cb  = np.full(n, np.nan, dtype=float)   # choch_bull          (float, NaN default)
+        a_cr  = np.full(n, np.nan, dtype=float)   # choch_bear          (float, NaN default)
+        a_cbr = np.full(n, -1, dtype=int)         # choch_bull_ref_bar  (int, -1 default)
+        a_crr = np.full(n, -1, dtype=int)         # choch_bear_ref_bar  (int, -1 default)
 
         sh_arr     = result["swing_high"].to_numpy(dtype=float)
         sl_arr     = result["swing_low"].to_numpy(dtype=float)
@@ -111,17 +106,23 @@ class CHoCHDetector:
 
             # CHoCH bull: bearish market breaks upward
             if bias == "bearish" and pending_sh is not None and c > pending_sh:
-                result.iloc[pos, col_cb]  = pending_sh
-                result.iloc[pos, col_cbr] = pending_sh_bar
+                a_cb[pos]  = pending_sh
+                a_cbr[pos] = pending_sh_bar
                 pending_sh     = None
                 pending_sh_bar = -1
 
             # CHoCH bear: bullish market breaks downward
             if bias == "bullish" and pending_sl is not None and c < pending_sl:
-                result.iloc[pos, col_cr]  = pending_sl
-                result.iloc[pos, col_crr] = pending_sl_bar
+                a_cr[pos]  = pending_sl
+                a_crr[pos] = pending_sl_bar
                 pending_sl     = None
                 pending_sl_bar = -1
+
+        # Assign each accumulated column ONCE after the loop (vectorized).
+        result["choch_bull"]         = a_cb
+        result["choch_bear"]         = a_cr
+        result["choch_bull_ref_bar"] = a_cbr
+        result["choch_bear_ref_bar"] = a_crr
 
         n_bull = result["choch_bull"].notna().sum()
         n_bear = result["choch_bear"].notna().sum()

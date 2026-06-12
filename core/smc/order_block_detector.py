@@ -89,17 +89,18 @@ class OrderBlockDetector:
         result = df.copy()
         n = len(result)
 
-        result["ob_type"]         = pd.Series([None] * n, dtype=object, index=result.index)
-        result["ob_top"]          = np.nan
-        result["ob_bottom"]       = np.nan
-        result["ob_trigger_bar"]  = -1
-        result["ob_trigger_type"] = pd.Series([None] * n, dtype=object, index=result.index)
-
-        col_type    = result.columns.get_loc("ob_type")
-        col_top     = result.columns.get_loc("ob_top")
-        col_bot     = result.columns.get_loc("ob_bottom")
-        col_tbar    = result.columns.get_loc("ob_trigger_bar")
-        col_ttype   = result.columns.get_loc("ob_trigger_type")
+        # Accumulate per-row values in numpy arrays inside the loop, then assign
+        # each whole column ONCE after the loop. This avoids the pandas
+        # cell-by-cell _setitem_with_indexer anti-pattern (result.iloc[i, col] = v)
+        # that dominates the backtest. Defaults match the original column dtypes:
+        #   ob_type / ob_trigger_type : object (None default, holds strings)
+        #   ob_top / ob_bottom        : float  (NaN default)
+        #   ob_trigger_bar            : int    (-1 default)
+        a_type  = np.full(n, None, dtype=object)
+        a_top   = np.full(n, np.nan, dtype=float)
+        a_bot   = np.full(n, np.nan, dtype=float)
+        a_tbar  = np.full(n, -1, dtype=int)
+        a_ttype = np.full(n, None, dtype=object)
 
         opens  = result["open"].to_numpy(dtype=float)
         highs  = result["high"].to_numpy(dtype=float)
@@ -124,11 +125,11 @@ class OrderBlockDetector:
             if ob_bar in marked:
                 return
             marked.add(ob_bar)
-            result.iloc[ob_bar, col_type]  = ob_direction
-            result.iloc[ob_bar, col_top]   = highs[ob_bar]
-            result.iloc[ob_bar, col_bot]   = lows[ob_bar]
-            result.iloc[ob_bar, col_tbar]  = trigger_bar
-            result.iloc[ob_bar, col_ttype] = trigger_type
+            a_type[ob_bar]  = ob_direction
+            a_top[ob_bar]   = highs[ob_bar]
+            a_bot[ob_bar]   = lows[ob_bar]
+            a_tbar[ob_bar]  = trigger_bar
+            a_ttype[ob_bar] = trigger_type
             counts[ob_direction] = counts.get(ob_direction, 0) + 1
 
         def _find_opposing(scan_from: int, direction: str) -> int:
@@ -187,6 +188,13 @@ class OrderBlockDetector:
                     ob_bar = _find_opposing(c2_idx - 1, "bear")
                     if ob_bar >= 0:
                         _mark_ob(ob_bar, "bear", j, "fvg")
+
+        # Assign each whole column ONCE (single _setitem per column).
+        result["ob_type"]         = a_type
+        result["ob_top"]          = a_top
+        result["ob_bottom"]       = a_bot
+        result["ob_trigger_bar"]  = a_tbar
+        result["ob_trigger_type"] = a_ttype
 
         logger.debug(
             "[OrderBlockDetector] bull_obs=%d bear_obs=%d max_lookback=%d",

@@ -119,15 +119,14 @@ class LiquidityDetector:
 
     def _detect_eqh_eql(self, df: pd.DataFrame) -> pd.DataFrame:
         n = len(df)
-        df["eqh_level"] = np.nan
-        df["eqh_count"] = 0
-        df["eql_level"] = np.nan
-        df["eql_count"] = 0
 
-        col_eqh_l = df.columns.get_loc("eqh_level")
-        col_eqh_c = df.columns.get_loc("eqh_count")
-        col_eql_l = df.columns.get_loc("eql_level")
-        col_eql_c = df.columns.get_loc("eql_count")
+        # Per-row accumulators, written to the DataFrame once after the loop
+        # (avoids the per-cell .iloc setitem anti-pattern). Defaults match the
+        # original column initialisation: NaN for levels, 0 for counts.
+        a_eqh_l = np.full(n, np.nan, dtype=float)
+        a_eqh_c = np.zeros(n, dtype=int)
+        a_eql_l = np.full(n, np.nan, dtype=float)
+        a_eql_c = np.zeros(n, dtype=int)
 
         sh_arr = df["swing_high"].to_numpy(dtype=float)
         sl_arr = df["swing_low"].to_numpy(dtype=float)
@@ -168,11 +167,17 @@ class LiquidityDetector:
 
             # ---- Carry forward into output ----
             if not np.isnan(cur_eqh_level):
-                df.iloc[pos, col_eqh_l] = cur_eqh_level
-                df.iloc[pos, col_eqh_c] = cur_eqh_count
+                a_eqh_l[pos] = cur_eqh_level
+                a_eqh_c[pos] = cur_eqh_count
             if not np.isnan(cur_eql_level):
-                df.iloc[pos, col_eql_l] = cur_eql_level
-                df.iloc[pos, col_eql_c] = cur_eql_count
+                a_eql_l[pos] = cur_eql_level
+                a_eql_c[pos] = cur_eql_count
+
+        # Assign each whole column once (was per-cell .iloc inside the loop).
+        df["eqh_level"] = a_eqh_l
+        df["eqh_count"] = a_eqh_c
+        df["eql_level"] = a_eql_l
+        df["eql_count"] = a_eql_c
 
         logger.debug(
             "[LiquidityDetector] EQH bars=%d EQL bars=%d (tol=%.3f%%)",

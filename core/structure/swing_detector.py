@@ -95,14 +95,20 @@ class SwingDetector:
         self._validate(df, timeframe, window)
 
         result = df.copy()
-        result["swing_high"]     = np.nan
-        result["swing_low"]      = np.nan
-        result["swing_high_idx"] = -1
-        result["swing_low_idx"]  = -1
 
         highs = df["high"].to_numpy()
         lows  = df["low"].to_numpy()
         n     = len(df)
+
+        # Accumulate per-row values into numpy arrays inside the loop, then
+        # assign each whole column ONCE after the loop. This avoids the pandas
+        # per-cell _setitem_with_indexer anti-pattern while producing values
+        # and dtypes byte-for-byte identical to the original cell assignment
+        # (float64 for prices, int64 for indices).
+        a_swing_high     = np.full(n, np.nan, dtype=float)
+        a_swing_low      = np.full(n, np.nan, dtype=float)
+        a_swing_high_idx = np.full(n, -1, dtype=int)
+        a_swing_low_idx  = np.full(n, -1, dtype=int)
 
         # We iterate over potential swing bars.
         # Bar i is a swing if it is the extreme within [i-lag, i+lag].
@@ -115,13 +121,18 @@ class SwingDetector:
 
             # Swing high: bar i's high is strictly the maximum in the window
             if highs[i] == window_highs.max() and np.sum(window_highs == highs[i]) == 1:
-                result.iloc[confirm_idx, result.columns.get_loc("swing_high")]     = highs[i]
-                result.iloc[confirm_idx, result.columns.get_loc("swing_high_idx")] = i
+                a_swing_high[confirm_idx]     = highs[i]
+                a_swing_high_idx[confirm_idx] = i
 
             # Swing low: bar i's low is strictly the minimum in the window
             if lows[i] == window_lows.min() and np.sum(window_lows == lows[i]) == 1:
-                result.iloc[confirm_idx, result.columns.get_loc("swing_low")]     = lows[i]
-                result.iloc[confirm_idx, result.columns.get_loc("swing_low_idx")] = i
+                a_swing_low[confirm_idx]     = lows[i]
+                a_swing_low_idx[confirm_idx] = i
+
+        result["swing_high"]     = a_swing_high
+        result["swing_low"]      = a_swing_low
+        result["swing_high_idx"] = a_swing_high_idx
+        result["swing_low_idx"]  = a_swing_low_idx
 
         n_highs = result["swing_high"].notna().sum()
         n_lows  = result["swing_low"].notna().sum()

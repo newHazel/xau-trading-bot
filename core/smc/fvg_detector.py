@@ -96,17 +96,11 @@ class FVGDetector:
         result = df.copy()
         n = len(result)
 
-        result["fvg_type"]   = None
-        result["fvg_top"]    = np.nan
-        result["fvg_bottom"] = np.nan
-        result["fvg_size"]   = np.nan
-        result["fvg_c1_idx"] = -1
-
-        col_t  = result.columns.get_loc("fvg_type")
-        col_to = result.columns.get_loc("fvg_top")
-        col_bo = result.columns.get_loc("fvg_bottom")
-        col_sz = result.columns.get_loc("fvg_size")
-        col_c1 = result.columns.get_loc("fvg_c1_idx")
+        a_type = np.full(n, None, dtype=object)
+        a_top  = np.full(n, np.nan, dtype=float)
+        a_bot  = np.full(n, np.nan, dtype=float)
+        a_size = np.full(n, np.nan, dtype=float)
+        a_c1   = np.full(n, -1, dtype=int)
 
         highs  = result["high"].to_numpy(dtype=float)
         lows   = result["low"].to_numpy(dtype=float)
@@ -129,11 +123,11 @@ class FVGDetector:
             if c1_high < c3_low:
                 gap_size = c3_low - c1_high
                 if gap_size > threshold:
-                    result.iloc[i, col_t]  = "bull"
-                    result.iloc[i, col_to] = c3_low
-                    result.iloc[i, col_bo] = c1_high
-                    result.iloc[i, col_sz] = gap_size
-                    result.iloc[i, col_c1] = i - 2
+                    a_type[i] = "bull"
+                    a_top[i]  = c3_low
+                    a_bot[i]  = c1_high
+                    a_size[i] = gap_size
+                    a_c1[i]   = i - 2
                     n_bull += 1
                     continue   # mutually exclusive with bear
 
@@ -141,12 +135,18 @@ class FVGDetector:
             if c1_low > c3_high:
                 gap_size = c1_low - c3_high
                 if gap_size > threshold:
-                    result.iloc[i, col_t]  = "bear"
-                    result.iloc[i, col_to] = c1_low
-                    result.iloc[i, col_bo] = c3_high
-                    result.iloc[i, col_sz] = gap_size
-                    result.iloc[i, col_c1] = i - 2
+                    a_type[i] = "bear"
+                    a_top[i]  = c1_low
+                    a_bot[i]  = c3_high
+                    a_size[i] = gap_size
+                    a_c1[i]   = i - 2
                     n_bear += 1
+
+        result["fvg_type"]   = a_type
+        result["fvg_top"]    = a_top
+        result["fvg_bottom"] = a_bot
+        result["fvg_size"]   = a_size
+        result["fvg_c1_idx"] = a_c1
 
         logger.debug(
             "[FVGDetector] atr_period=%d threshold=%.2f×ATR  bull=%d bear=%d in %d bars",

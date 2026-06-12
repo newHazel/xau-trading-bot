@@ -95,13 +95,11 @@ class DisplacementDetector:
         result = df.copy()
         n = len(result)
 
-        result["displacement_type"]     = None
-        result["displacement_body_atr"] = np.nan
-        result["displacement_body_pct"] = np.nan
-
-        col_t = result.columns.get_loc("displacement_type")
-        col_a = result.columns.get_loc("displacement_body_atr")
-        col_p = result.columns.get_loc("displacement_body_pct")
+        # Accumulate per-row results in numpy arrays, then assign each whole
+        # column ONCE after the loop (avoids per-cell .iloc setitem overhead).
+        a_t = np.full(n, None, dtype=object)   # displacement_type ('bull'|'bear'|None)
+        a_a = np.full(n, np.nan, dtype=float)  # displacement_body_atr
+        a_p = np.full(n, np.nan, dtype=float)  # displacement_body_pct
 
         opens  = result["open"].to_numpy(dtype=float)
         highs  = result["high"].to_numpy(dtype=float)
@@ -139,18 +137,22 @@ class DisplacementDetector:
             if c > o:                           # bullish candle
                 prev_max = highs[i - self._break_lookback : i].max()
                 if c > prev_max:
-                    result.iloc[i, col_t] = "bull"
-                    result.iloc[i, col_a] = body_atr
-                    result.iloc[i, col_p] = body_pct
+                    a_t[i] = "bull"
+                    a_a[i] = body_atr
+                    a_p[i] = body_pct
                     n_bull += 1
             elif c < o:                         # bearish candle
                 prev_min = lows[i - self._break_lookback : i].min()
                 if c < prev_min:
-                    result.iloc[i, col_t] = "bear"
-                    result.iloc[i, col_a] = body_atr
-                    result.iloc[i, col_p] = body_pct
+                    a_t[i] = "bear"
+                    a_a[i] = body_atr
+                    a_p[i] = body_pct
                     n_bear += 1
             # close == open → doji → skip
+
+        result["displacement_type"]     = a_t
+        result["displacement_body_atr"] = a_a
+        result["displacement_body_pct"] = a_p
 
         logger.debug(
             "[DisplacementDetector] body≥%.2f×ATR  body/range≥%.2f  break=%d → bull=%d bear=%d in %d bars",

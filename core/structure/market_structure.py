@@ -86,13 +86,9 @@ class MarketStructure:
         result = df_with_swings.copy()
         n = len(result)
 
-        result["swing_label_high"] = None
-        result["swing_label_low"]  = None
-        result["structure_bias"]   = "neutral"
-
-        col_h = result.columns.get_loc("swing_label_high")
-        col_l = result.columns.get_loc("swing_label_low")
-        col_b = result.columns.get_loc("structure_bias")
+        labels_high = np.full(n, None, dtype=object)
+        labels_low  = np.full(n, None, dtype=object)
+        bias_arr    = np.full(n, "neutral", dtype=object)
 
         highs_arr = result["swing_high"].to_numpy(dtype=float)
         lows_arr  = result["swing_low"].to_numpy(dtype=float)
@@ -109,18 +105,22 @@ class MarketStructure:
             if not np.isnan(sh):
                 label = _compare_swing(sh, prev_high, "HH", "LH", "EH")
                 if label is not None:
-                    result.iloc[pos, col_h] = label
+                    labels_high[pos] = label
                     last_high_label = label
                 prev_high = float(sh)
 
             if not np.isnan(sl):
                 label = _compare_swing(sl, prev_low, "HL", "LL", "EL")
                 if label is not None:
-                    result.iloc[pos, col_l] = label
+                    labels_low[pos] = label
                     last_low_label = label
                 prev_low = float(sl)
 
-            result.iloc[pos, col_b] = _bias_from(last_high_label, last_low_label)
+            bias_arr[pos] = _bias_from(last_high_label, last_low_label)
+
+        result["swing_label_high"] = labels_high
+        result["swing_label_low"]  = labels_low
+        result["structure_bias"]   = bias_arr
 
         logger.debug(
             "[MarketStructure] HH=%d LH=%d HL=%d LL=%d | final_bias=%s",

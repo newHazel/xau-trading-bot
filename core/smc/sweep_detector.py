@@ -100,19 +100,17 @@ class SweepDetector:
         result = df.copy()
         n = len(result)
 
-        result["sweep_bull_level"]    = np.nan
-        result["sweep_bull_type"]     = None
-        result["sweep_bull_wick_bar"] = -1
-        result["sweep_bear_level"]    = np.nan
-        result["sweep_bear_type"]     = None
-        result["sweep_bear_wick_bar"] = -1
-
-        col_bul_l = result.columns.get_loc("sweep_bull_level")
-        col_bul_t = result.columns.get_loc("sweep_bull_type")
-        col_bul_w = result.columns.get_loc("sweep_bull_wick_bar")
-        col_ber_l = result.columns.get_loc("sweep_bear_level")
-        col_ber_t = result.columns.get_loc("sweep_bear_type")
-        col_ber_w = result.columns.get_loc("sweep_bear_wick_bar")
+        # Per-row results accumulate into numpy arrays inside the loop and are
+        # assigned to whole columns ONCE after the loop. Dtypes are chosen to
+        # match the original column-default assignment exactly:
+        #   level -> float (default NaN); type -> object (default None);
+        #   wick_bar -> int64 (default -1).
+        a_bul_l = np.full(n, np.nan, dtype=float)
+        a_bul_t = np.full(n, None, dtype=object)
+        a_bul_w = np.full(n, -1, dtype=np.int64)
+        a_ber_l = np.full(n, np.nan, dtype=float)
+        a_ber_t = np.full(n, None, dtype=object)
+        a_ber_w = np.full(n, -1, dtype=np.int64)
 
         sh_arr  = result["swing_high"].to_numpy(dtype=float)
         sl_arr  = result["swing_low"].to_numpy(dtype=float)
@@ -193,9 +191,9 @@ class SweepDetector:
             confirmed_bull = self._scan_pending(pending_bull, pos, close, direction="bull")
 
             if confirmed_bear is not None:
-                result.iloc[pos, col_ber_l] = confirmed_bear["level"]
-                result.iloc[pos, col_ber_t] = confirmed_bear["type"]
-                result.iloc[pos, col_ber_w] = confirmed_bear["wick_bar"]
+                a_ber_l[pos] = confirmed_bear["level"]
+                a_ber_t[pos] = confirmed_bear["type"]
+                a_ber_w[pos] = confirmed_bear["wick_bar"]
                 swept_at[confirmed_bear["type"]] = confirmed_bear["level"]
                 # drop other pending entries on the same swept level
                 pending_bear = [
@@ -205,15 +203,23 @@ class SweepDetector:
                 n_bear += 1
 
             if confirmed_bull is not None:
-                result.iloc[pos, col_bul_l] = confirmed_bull["level"]
-                result.iloc[pos, col_bul_t] = confirmed_bull["type"]
-                result.iloc[pos, col_bul_w] = confirmed_bull["wick_bar"]
+                a_bul_l[pos] = confirmed_bull["level"]
+                a_bul_t[pos] = confirmed_bull["type"]
+                a_bul_w[pos] = confirmed_bull["wick_bar"]
                 swept_at[confirmed_bull["type"]] = confirmed_bull["level"]
                 pending_bull = [
                     p for p in pending_bull
                     if not (p["type"] == confirmed_bull["type"] and p["level"] == confirmed_bull["level"])
                 ]
                 n_bull += 1
+
+        # Assign each accumulated column ONCE (avoids per-cell _setitem_with_indexer).
+        result["sweep_bull_level"]    = a_bul_l
+        result["sweep_bull_type"]     = a_bul_t
+        result["sweep_bull_wick_bar"] = a_bul_w
+        result["sweep_bear_level"]    = a_ber_l
+        result["sweep_bear_type"]     = a_ber_t
+        result["sweep_bear_wick_bar"] = a_ber_w
 
         logger.debug(
             "[SweepDetector] window=%d  bullish=%d  bearish=%d  in %d bars",

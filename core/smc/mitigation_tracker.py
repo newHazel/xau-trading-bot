@@ -90,15 +90,10 @@ class MitigationTracker:
         result = df_with_fvg.copy()
         n = len(result)
 
-        result["mitigation_state"]           = pd.Series([None] * n, dtype=object, index=result.index)
-        result["mitigation_first_touch_bar"] = -1
-        result["mitigation_max_fill_pct"]    = np.nan
-        result["mitigation_invalidated_bar"] = -1
-
-        col_s = result.columns.get_loc("mitigation_state")
-        col_t = result.columns.get_loc("mitigation_first_touch_bar")
-        col_f = result.columns.get_loc("mitigation_max_fill_pct")
-        col_i = result.columns.get_loc("mitigation_invalidated_bar")
+        a_s = np.full(n, None, dtype=object)        # mitigation_state
+        a_t = np.full(n, -1, dtype=np.int64)        # mitigation_first_touch_bar
+        a_f = np.full(n, np.nan, dtype=float)       # mitigation_max_fill_pct
+        a_i = np.full(n, -1, dtype=np.int64)        # mitigation_invalidated_bar
 
         fvg_type_arr = result["fvg_type"].to_numpy()
         top_arr      = result["fvg_top"].to_numpy(dtype=float)
@@ -148,12 +143,17 @@ class MitigationTracker:
 
             state = self._classify(max_fill, invalidated_bar)
 
-            result.iloc[f, col_s] = state
-            result.iloc[f, col_t] = first_touch_bar
-            result.iloc[f, col_f] = max_fill
-            result.iloc[f, col_i] = invalidated_bar
+            a_s[f] = state
+            a_t[f] = first_touch_bar
+            a_f[f] = max_fill
+            a_i[f] = invalidated_bar
 
             counts[state] = counts.get(state, 0) + 1
+
+        result["mitigation_state"]           = a_s
+        result["mitigation_first_touch_bar"] = a_t
+        result["mitigation_max_fill_pct"]    = a_f
+        result["mitigation_invalidated_bar"] = a_i
 
         logger.debug("[MitigationTracker] states=%s", counts)
         return result
