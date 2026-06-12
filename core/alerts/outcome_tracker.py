@@ -24,6 +24,13 @@ from typing import Any, List, Dict, Optional
 
 
 class OutcomeTracker:
+    # Low-win% strategy survival: at ~21% win/PF 1.57 a 6-loss streak is statistically
+    # NORMAL (12% chance) — without psychological scaffolding the user disables the bot
+    # mid-streak and misses the rare big winners that carry the edge. These thresholds
+    # power the streak-warning + recovery-mode notes that keep the user in the game.
+    LOSING_STREAK_WARN_AT = 4
+    BIG_WIN_R_THRESHOLD = 2.5
+
     def __init__(self, max_open_hours: float = 48.0) -> None:
         self._open: List[Dict[str, Any]] = []
         self.wins = 0
@@ -32,6 +39,12 @@ class OutcomeTracker:
         self.gross_win_r = 0.0
         self.gross_loss_r = 0.0
         self._max_open = timedelta(hours=max_open_hours)
+        # streak tracking — for the "stay in the game" psychological notes
+        self._current_loss_streak = 0
+        self._max_loss_streak = 0
+        self._losses_since_last_win = 0
+        self._r_since_last_win = 0.0
+        self._streak_warning_sent = False
 
     # ----- record an alert ------------------------------------------------ #
     def record(self, sig: Any, now: datetime) -> None:
@@ -68,11 +81,19 @@ class OutcomeTracker:
             if label == "WIN":
                 self.wins += 1
                 self.gross_win_r += r
+                self._current_loss_streak = 0
+                self._streak_warning_sent = False
             else:
                 self.losses += 1
                 self.gross_loss_r += abs(r)
+                self._current_loss_streak += 1
+                self._losses_since_last_win += 1
+                self._r_since_last_win -= 1.0
+                if self._current_loss_streak > self._max_loss_streak:
+                    self._max_loss_streak = self._current_loss_streak
             self.total_r += r
             self._notify(sender, s, label, r)
+            self._maybe_psych_note(sender, label, r)
         self._open = still
 
     def _resolve(self, s: Dict[str, Any], hi: float, lo: float):
@@ -100,8 +121,13 @@ class OutcomeTracker:
         wr = (100.0 * self.wins / n) if n else 0.0
         pf = self.profit_factor()
         pf_s = "n/a" if pf is None else ("∞" if pf == float("inf") else f"{pf:.2f}")
+        streak = ""
+        if self._current_loss_streak >= 2:
+            streak = f" | streak: {self._current_loss_streak}L"
+        elif self._max_loss_streak >= 3:
+            streak = f" | max streak: {self._max_loss_streak}L"
         return (f"forward record: {n} closed | {wr:.0f}% win | {self.total_r:+.1f}R "
-                f"| PF {pf_s} | {len(self._open)} open")
+                f"| PF {pf_s} | {len(self._open)} open{streak}")
 
     def _notify(self, sender: Any, s: Dict[str, Any], label: str, r: float) -> None:
         if sender is None:
@@ -114,3 +140,37 @@ class OutcomeTracker:
             sender.send(text)
         except Exception:
             pass
+
+    def _maybe_psych_note(self, sender: Any, label: str, r: float) -> None:
+        """Survival scaffolding for a low-win% / high-PF strategy: warn the user when a
+        losing streak hits the WARN threshold, and on each big winner remind them that
+        ONE such trade typically covers a stack of losses — so they don't disable the
+        bot mid-streak and miss the rare winners that carry the +EV."""
+        if sender is None:
+            return
+        text: Optional[str] = None
+        if (label == "LOSS"
+                and self._current_loss_streak >= self.LOSING_STREAK_WARN_AT
+                and not self._streak_warning_sent):
+            text = (f"⚠️ <b>Losing streak: {self._current_loss_streak} in a row.</b>\n"
+                    f"This is STATISTICALLY NORMAL at win~25% / PF~1.6 "
+                    f"(a 6-streak has ~12% probability).\n"
+                    f"The edge is in the rare ~3.5R winners — disabling the bot now "
+                    f"is what TURNS the math negative. Trust the sample.")
+            self._streak_warning_sent = True
+        elif label == "WIN" and r >= self.BIG_WIN_R_THRESHOLD and self._losses_since_last_win >= 3:
+            covered = self._losses_since_last_win  # how many losses this one win covered
+            text = (f"💪 <b>This +{r:.1f}R win covered the last {covered} losses</b> "
+                    f"(net {self._r_since_last_win + r:+.1f}R).\n"
+                    f"This is exactly the asymmetry that makes a low-win% strategy +EV. "
+                    f"Stay disciplined.")
+        # reset post-win counters AFTER computing the message (so we report the streak
+        # the winner just broke)
+        if label == "WIN":
+            self._losses_since_last_win = 0
+            self._r_since_last_win = 0.0
+        if text:
+            try:
+                sender.send(text)
+            except Exception:
+                pass

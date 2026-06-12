@@ -68,3 +68,70 @@ class TestOutcomeTracker:
         t = OutcomeTracker()
         t.record(_Sig("long", 100.0, 100.0, 104.0), NOW)  # risk 0 → ignored
         assert len(t._open) == 0
+
+
+class _CaptureSender:
+    def __init__(self):
+        self.msgs = []
+
+    def send(self, text):
+        self.msgs.append(text)
+
+
+def _resolve_loss(t, sender=None):
+    t.record(_Sig("short", 100.0, 102.0, 96.0), NOW)   # short setup
+    t.update(_bar(103.0, 101.0), sender=sender, now=NOW)  # high >= SL → loss
+
+
+def _resolve_big_win(t, sender=None):
+    t.record(_Sig("long", 100.0, 98.0, 110.0), NOW)    # 5R target (110-100 over 2)
+    t.update(_bar(112.0, 99.0), sender=sender, now=NOW)   # high >= TP → big win
+
+
+class TestPsychNotes:
+    """Low-win% / high-PF strategies fail without psychological scaffolding —
+    the streak warning + recovery note keep the user in the game."""
+
+    def test_losing_streak_triggers_warning_at_threshold(self):
+        t = OutcomeTracker()
+        sender = _CaptureSender()
+        for _ in range(OutcomeTracker.LOSING_STREAK_WARN_AT):
+            _resolve_loss(t, sender)
+        warns = [m for m in sender.msgs if "Losing streak" in m]
+        assert len(warns) == 1                        # exactly one warning
+        assert f"{OutcomeTracker.LOSING_STREAK_WARN_AT} in a row" in warns[0]
+
+    def test_no_warning_below_threshold(self):
+        t = OutcomeTracker()
+        sender = _CaptureSender()
+        for _ in range(OutcomeTracker.LOSING_STREAK_WARN_AT - 1):
+            _resolve_loss(t, sender)
+        assert not any("Losing streak" in m for m in sender.msgs)
+
+    def test_big_win_after_losses_triggers_recovery_note(self):
+        t = OutcomeTracker()
+        sender = _CaptureSender()
+        for _ in range(4):
+            _resolve_loss(t, sender)
+        _resolve_big_win(t, sender)
+        notes = [m for m in sender.msgs if "covered the last" in m]
+        assert len(notes) == 1 and "4 losses" in notes[0]
+
+    def test_streak_resets_on_win(self):
+        t = OutcomeTracker()
+        sender = _CaptureSender()
+        for _ in range(3):
+            _resolve_loss(t, sender)
+        _resolve_big_win(t, sender)
+        assert t._current_loss_streak == 0
+        # next 4 losses should be able to trigger a NEW warning
+        sender.msgs.clear()
+        for _ in range(4):
+            _resolve_loss(t, sender)
+        assert any("Losing streak" in m for m in sender.msgs)
+
+    def test_summary_shows_active_streak(self):
+        t = OutcomeTracker()
+        for _ in range(3):
+            _resolve_loss(t)
+        assert "streak: 3L" in t.summary_line()
