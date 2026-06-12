@@ -1,24 +1,34 @@
 timezone: "Asia/Jerusalem"
+# LOOSEN-THE-BRAKES v2 (2026-06-12): no_killzone (any session) gave PF 1.57 / +17.8R but
+# win% 21% — too low for psychological survival. Compromise = open ALL major sessions.
+# SessionFilter recognizes 4 session keys (asia_range / london_kill_zone / ny_kill_zone
+# / overlap), so we EXPAND each one's window to cover the full real session:
+#   * Asia: 01:00-10:00 IL  (covers Sydney + Tokyo + Asia range)
+#   * London: 10:00-19:00 IL  (full London)
+#   * NY: 15:00-23:59 IL  (full NY)
+#   * Overlap: 15:30-17:00 IL stays highest priority
+# Net: 23+ hours of every 24 are tradeable; only 00:00-01:00 IL (the truly dead window
+# between NY close and Sydney open) is filtered out.
 asia_range:
   enabled: true
-  start: "02:00"
-  end: "07:00"
-  trade_allowed: false
+  start: "01:00"
+  end: "10:00"                   # was 02:00-07:00 — full Asia (Sydney + Tokyo) window
+  trade_allowed: true            # was false — Asia range may now be traded
   mark_high_low: true
 london_kill_zone:
   enabled: true
   start: "10:00"
-  end: "13:00"
+  end: "19:00"                   # was 10:00-13:00 — full London session
   trade_allowed: true
 ny_kill_zone:
   enabled: true
-  start: "15:30"
-  end: "18:00"
+  start: "15:00"
+  end: "23:59"                   # was 15:30-18:00 — full NY session
   trade_allowed: true
 overlap:
   enabled: true
   start: "15:30"
-  end: "17:00"
+  end: "17:00"                   # London/NY overlap stays highest priority
   trade_allowed: true
   priority: "highest"
 fix_levels:
