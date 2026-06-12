@@ -1,6 +1,13 @@
 # F10: account size used to size the suggested lot in alerts. Set this to YOUR real
 # balance so the lot_size shown is correct for your account (alerts only — no auto-trade).
 account_balance: 10000.0
+# Loosen-the-brakes EXPERIMENT (2026-06-12): the server backtest on Apr10→Jun12 showed
+# no_killzone earning its keep — 67 sig (vs 22 baseline), PF 1.57 vs 1.27, +17.8R vs
+# +2.3R. Bypassing the kill-zone gate lets the bot trade ANY session. The 2-month
+# sample is noisy (baseline freshness PF varied 3.13↔1.27 across periods), so this is
+# a deliberate forward-data bet: the outcome tracker + near-miss logger will measure
+# real forward results. Flip back to false to restore the kill-zone-only behavior.
+ignore_kill_zone: true
 risk_per_trade_percent: 0.5
 max_risk_per_trade_percent: 1.0
 max_daily_losses: 2
