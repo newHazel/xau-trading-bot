@@ -44,9 +44,11 @@ python -u scripts/backtest_sequence_parallel.py --symbol "${SYMBOL}" --verify --
 echo ">>> [4/4] backtest ${SYMBOL}: freshness(gold-sessions) vs crypto(24/7, the right one)"
 echo "    KEY: does our SMC strategy produce an edge on ETH? (signals, win%, PF, R)"
 echo "    crypto = LIVE config + price-sanity + 24/7 (ignore gold kill-zone)."
+# Full ~3.5-month sample (robustness check). freshness==crypto on ETH (sessions are
+# already ~24/7 live), so just run 'crypto' — the relevant 24/7 variant for crypto.
 python -u scripts/backtest_sequence_parallel.py --symbol "${SYMBOL}" \
-  --execution-tf 5m --total-bars 12000 --chunk-bars 1500 --jobs "${JOBS}" \
-  --variants freshness,crypto
+  --execution-tf 5m --total-bars 30000 --chunk-bars 1500 --jobs "${JOBS}" \
+  --variants crypto
 
 echo "=================================================================="
 echo "  DONE — copy the BACKTEST RESULT table. 'crypto' (24/7) is the relevant row for ETH."
