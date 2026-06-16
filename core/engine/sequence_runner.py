@@ -126,7 +126,7 @@ class SequenceRunner:
     _GATE_LABELS = {
         "kill_zone": "off kill-zone", "news_clear": "news window",
         "rr_minimum": "R:R < 2 net", "daily_limits_ok": "daily limit",
-        "no_blocking_filters": "blocking filter",
+        "no_blocking_filters": "blocking filter", "momentum_ok": "momentum not confirmed",
     }
 
     def _note_near_miss(self, ctx: PipelineContext, mandatory: Dict[str, Any],
@@ -287,6 +287,8 @@ class SequenceRunner:
             "rr_minimum": ctx.rr_minimum_ok,
             "daily_limits_ok": ctx.daily_limits_ok,
             "no_blocking_filters": ctx.no_blocking_filters,
+            # momentum-confirmation gate: absent (→ True) unless momentum_gate is on
+            "momentum_ok": ctx.extra.get("momentum_ok", True),
         }
         optional = SignalPipeline._build_optional(ctx)
         indicators = SignalPipeline._build_indicators(ctx)

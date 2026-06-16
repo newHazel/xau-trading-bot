@@ -247,3 +247,34 @@ class TestNearMiss:
         sig = r.on_bar(_bar(0), {})
         nm = r.last_near_miss
         assert sig is not None or (nm is not None and "kill-zone" not in nm["reason"])
+
+
+class TestMomentumGate:
+    """ctx.extra['momentum_ok'] gates the emit: a completed setup with momentum_ok False
+    is blocked (near-miss 'momentum not confirmed'); True or absent passes."""
+
+    FULL = {
+        "htf_bias": "long", "direction": "long", "structure_15m": "long",
+        "price_zone": "discount", "sweep": {"level": 2640}, "sweep_confirmed": True,
+        "fvg_valid": True, "fvg_fresh": True, "fvg": {"top": 2648, "bottom": 2644},
+        "retraced_to_zone": True, "micro_choch": True, "confirmation_candle": True,
+        "in_kill_zone": True, "news_clear": True, "no_blocking_filters": True,
+        "daily_limits_ok": True,
+    }
+
+    def test_momentum_false_blocks(self):
+        s = _Script(); s.fields.update(self.FULL); s.fields["extra"] = {"momentum_ok": False}
+        r = _runner(s)
+        assert r.on_bar(_bar(0), {}) is None
+        nm = r.last_near_miss
+        assert nm is not None and "momentum" in nm["reason"]
+
+    def test_momentum_true_passes(self):
+        s = _Script(); s.fields.update(self.FULL); s.fields["extra"] = {"momentum_ok": True}
+        r = _runner(s)
+        assert r.on_bar(_bar(0), {}) is not None
+
+    def test_momentum_absent_passes(self):
+        s = _Script(); s.fields.update(self.FULL)  # no extra → momentum_ok absent → True
+        r = _runner(s)
+        assert r.on_bar(_bar(0), {}) is not None

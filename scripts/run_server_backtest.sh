@@ -61,14 +61,15 @@ echo ">>> [3/4] verifying the parallel backtest tool (chunked == sequential)"
 python -u scripts/backtest_sequence_parallel.py --verify --jobs "${JOBS}" || {
   echo "VERIFY FAILED — not trusting parallel numbers"; sleep 3600; exit 1; }
 
-echo ">>> [4/4] LOOSEN-THE-BRAKES experiment on 5m (the live TF, ~6 weeks sample)"
-echo "    freshness   = current LIVE config (baseline, PF ~3.1)"
-echo "    rr_15       = accept R:R down to 1.5 net (live floor is 2.0)"
-echo "    no_killzone = ignore the kill-zone gate (trade ANY session) — biggest brake off"
-echo "    KEY: each prints sig/mo + win%/PF/R, and a 'X vs freshness' verdict line."
+echo ">>> [4/4] MOMENTUM-GATE experiment on 5m (the live TF, ~6 weeks sample)"
+echo "    freshness = current LIVE config (baseline)"
+echo "    mom_rsi45 = + momentum gate (long needs RSI>=45 / short<=55) — skip falling knives"
+echo "    mom_rsi50 = + stricter gate (RSI on the right side of 50)"
+echo "    KEY: does the momentum gate RAISE win%/PF without killing too many signals?"
+echo "    (the 2026-06-15 forward losers entered at RSI 32/39 — does filtering them help?)"
 python -u scripts/backtest_sequence_parallel.py \
   --execution-tf 5m --total-bars 18000 --chunk-bars 1500 --jobs "${JOBS}" \
-  --variants freshness,rr_15,no_killzone
+  --variants freshness,mom_rsi45,mom_rsi50
 
 echo "=================================================================="
 echo "  DONE — copy the BACKTEST RESULT table + the 'vs freshness' lines."

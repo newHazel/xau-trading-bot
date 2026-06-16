@@ -101,3 +101,19 @@ class TestRiskHookNetRR:
         if ctx.entry is not None:                       # a trade was sized
             assert "gross_rr" in ctx.extra
             assert ctx.net_rr < ctx.extra["gross_rr"]   # costs strictly subtracted
+
+
+class TestComputeRSI:
+    """RSI powers the momentum-confirmation gate: high when rising, low when falling."""
+
+    def test_rising_series_high_rsi(self):
+        from core.engine.pipeline_hooks import compute_rsi
+        assert compute_rsi(pd.DataFrame({"close": [100 + i for i in range(30)]}), 14) > 70
+
+    def test_falling_series_low_rsi(self):
+        from core.engine.pipeline_hooks import compute_rsi
+        assert compute_rsi(pd.DataFrame({"close": [100 - i for i in range(30)]}), 14) < 30
+
+    def test_too_short_returns_neutral(self):
+        from core.engine.pipeline_hooks import compute_rsi
+        assert compute_rsi(pd.DataFrame({"close": [100, 101]}), 14) == 50.0

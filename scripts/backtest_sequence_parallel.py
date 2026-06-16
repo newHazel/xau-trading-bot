@@ -72,6 +72,12 @@ VARIANTS = {
     # filter removed. Shows how much frequency the kill-zone costs AND what it saves (PF).
     "no_killzone": {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
                     "ignore_kill_zone": True},
+    # momentum-confirmation gate (the 2026-06-15 losers entered at low RSI = falling knife).
+    # mom_rsi45: long needs RSI>=45 / short<=55.  mom_rsi50: stricter (RSI on the right side of 50).
+    "mom_rsi45": {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
+                  "momentum_gate": True, "rsi_long_min": 45.0, "rsi_short_max": 55.0},
+    "mom_rsi50": {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
+                  "momentum_gate": True, "rsi_long_min": 50.0, "rsi_short_max": 50.0},
 }
 
 

@@ -90,6 +90,22 @@ def atr_series(df: pd.DataFrame, period: int = 14, tail: int = 50) -> list:
     return [float(x) for x in roll.tail(tail)]
 
 
+def compute_rsi(df: pd.DataFrame, period: int = 14) -> float:
+    """Wilder RSI of the latest bar (0-100). Used by the momentum-confirmation gate:
+    a long taken while RSI is still very low = catching a falling knife. Lightweight."""
+    if df is None or len(df) < period + 1:
+        return 50.0
+    close = df["close"].astype(float)
+    delta = close.diff()
+    up = delta.clip(lower=0).ewm(alpha=1 / period, adjust=False).mean()
+    dn = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
+    last_dn = float(dn.iloc[-1])
+    if last_dn == 0:
+        return 100.0
+    rs = float(up.iloc[-1]) / last_dn
+    return 100.0 - 100.0 / (1.0 + rs)
+
+
 def _collect_levels(liq_df: pd.DataFrame, swing_df: pd.DataFrame, smc_dir: str) -> list:
     """Build a [{price, type}] list of liquidity pools for the TP-target finder.
 
@@ -368,6 +384,17 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
 
         # hand liquidity pools to the risk stage (for TP2 target search)
         ctx.extra["liquidity_levels"] = _collect_levels(liq_df, prepared, smc_dir)
+
+        # --- momentum-confirmation gate (momentum_gate, default OFF) ---
+        # Don't take an entry while momentum is still AGAINST it: a long entered at very
+        # low RSI is catching a falling knife (the 2026-06-15 losers entered at RSI 32/39
+        # and kept dropping; the winner was RSI 56). Only sets momentum_ok when the flag
+        # is on — otherwise it stays absent and _emit treats it as True (live unchanged).
+        if config.get("momentum_gate", False):
+            rsi = compute_rsi(df, int(config.get("rsi_period", 14)))
+            ctx.extra["rsi"] = rsi
+            ctx.extra["momentum_ok"] = (rsi >= float(config.get("rsi_long_min", 45.0))) if is_long \
+                else (rsi <= float(config.get("rsi_short_max", 55.0)))
 
     return hook
 
