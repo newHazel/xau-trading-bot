@@ -8,6 +8,13 @@ account_balance: 10000.0
 # session" — only the dead 00:00-01:00 IL window is skipped. Flip to true to fully
 # bypass the gate again (NOT recommended).
 ignore_kill_zone: false
+# Price-sanity gate (2026-06-16): DON'T fire a signal whose SL is ALREADY breached by
+# the current price (dead-on-arrival — the entry is stale/unreachable, e.g. the 06-16
+# 05:35 long whose price had already dropped below the SL). Backtest Apr-Jun: removed
+# 6/68 DOA signals with PF/win%/R UNCHANGED (1.52) — harmless in backtest (the entry-
+# trigger already drops them there), but in LIVE it stops un-actionable alerts + fake
+# tracker losses. A genuine correctness fix → ON.
+price_sanity_gate: true
 risk_per_trade_percent: 0.5
 max_risk_per_trade_percent: 1.0
 max_daily_losses: 2
