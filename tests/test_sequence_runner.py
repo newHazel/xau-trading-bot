@@ -278,3 +278,41 @@ class TestMomentumGate:
         s = _Script(); s.fields.update(self.FULL)  # no extra → momentum_ok absent → True
         r = _runner(s)
         assert r.on_bar(_bar(0), {}) is not None
+
+
+class TestPriceSanityGate:
+    """Don't fire a trade whose SL is ALREADY breached by the current closed price —
+    the captured FVG was blown through, so it's a dead-on-arrival loss (the 2026-06-16
+    05:35 long: entry 4324.87 / SL 4321.90 while price had already closed 4319.53)."""
+
+    SETUP = {  # full long setup that would otherwise be approved
+        "htf_bias": "long", "direction": "long", "structure_15m": "long",
+        "price_zone": "discount", "sweep": {"level": 2640}, "sweep_confirmed": True,
+        "fvg_valid": True, "fvg_fresh": True, "fvg": {"top": 2648, "bottom": 2644},
+        "retraced_to_zone": True, "micro_choch": True, "confirmation_candle": True,
+        "in_kill_zone": True, "news_clear": True, "no_blocking_filters": True,
+        "daily_limits_ok": True,
+    }
+
+    def _hist(self, last_close):
+        import pandas as pd
+        idx = pd.date_range("2026-06-16", periods=5, freq="15min", tz="UTC")
+        return {"15m": pd.DataFrame({"open": [last_close] * 5, "high": [last_close + 2] * 5,
+                                     "low": [last_close - 2] * 5, "close": [last_close] * 5}, index=idx)}
+
+    def test_doa_long_skipped(self):  # risk hook sets entry 2650 / SL 2640
+        s = _Script(); s.fields.update(self.SETUP)
+        r = SequenceRunner({**CONFIG, "price_sanity_gate": True}, hooks=_hooks(s))
+        sig = r.on_bar(_bar(0), self._hist(2630.0))   # price 2630 < SL 2640 → DOA
+        assert sig is None
+        assert r.last_near_miss and "DOA" in r.last_near_miss["reason"]
+
+    def test_normal_long_fires(self):
+        s = _Script(); s.fields.update(self.SETUP)
+        r = SequenceRunner({**CONFIG, "price_sanity_gate": True}, hooks=_hooks(s))
+        assert r.on_bar(_bar(0), self._hist(2655.0)) is not None   # price 2655 > SL → ok
+
+    def test_gate_off_still_fires_doa(self):
+        s = _Script(); s.fields.update(self.SETUP)
+        r = SequenceRunner({**CONFIG, "price_sanity_gate": False}, hooks=_hooks(s))
+        assert r.on_bar(_bar(0), self._hist(2630.0)) is not None   # gate off → legacy

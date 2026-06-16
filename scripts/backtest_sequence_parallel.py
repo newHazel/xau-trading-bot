@@ -78,6 +78,10 @@ VARIANTS = {
                   "momentum_gate": True, "rsi_long_min": 45.0, "rsi_short_max": 55.0},
     "mom_rsi50": {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
                   "momentum_gate": True, "rsi_long_min": 50.0, "rsi_short_max": 50.0},
+    # price-sanity gate: skip "dead-on-arrival" signals where current price already
+    # broke past the SL (the FVG was blown through). Does removing them raise win%/PF?
+    "sane":      {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
+                  "price_sanity_gate": True},
 }
 
 

@@ -113,6 +113,12 @@ class SequenceRunner:
         # the kill-zone filter actually costs/saves. NOT for live use without validation.
         self._ignore_kill_zone = bool(config.get("ignore_kill_zone", False))
 
+        # Price-sanity gate (default OFF, backtest first): never fire a trade whose SL is
+        # ALREADY breached by the current closed price — the captured FVG was broken
+        # through, so it is a dead-on-arrival loss (e.g. 2026-06-16 05:35 long: entry
+        # 4324.87 / SL 4321.90 while price had already closed 4319.53, below the SL).
+        self._price_sanity_gate = bool(config.get("price_sanity_gate", False))
+
     @property
     def state(self) -> State:
         return self._sm.state
@@ -275,6 +281,24 @@ class SequenceRunner:
         if ctx.entry is None or ctx.sl is None or ctx.tp1 is None:
             self._reset(now, "risk could not size the setup")
             return None
+
+        # Price-sanity gate: if the current (closed) price has ALREADY broken past the
+        # SL, the captured FVG/zone was blown through — this is a dead-on-arrival loss
+        # (the entry is stale/unreachable). Invalidate instead of firing.
+        if self._price_sanity_gate:
+            df = history.get(self._exec_tf) if isinstance(history, dict) else None
+            if df is not None and getattr(df, "empty", True) is False and len(df) >= 1:
+                cur = float(df["close"].iloc[-1])
+                broken = ((ctx.direction == "long" and cur <= ctx.sl)
+                          or (ctx.direction == "short" and cur >= ctx.sl))
+                if broken:
+                    self._last_near_miss = {
+                        "reason": "price broke past SL (DOA)", "grade": "?",
+                        "direction": ctx.direction, "entry": ctx.entry,
+                        "rr": ctx.net_rr, "timestamp": now,
+                    }
+                    self._reset(now, "price already beyond SL — setup invalidated (DOA)")
+                    return None
 
         # sequence conditions are TRUE (we tracked them); gates checked now.
         mandatory = {
