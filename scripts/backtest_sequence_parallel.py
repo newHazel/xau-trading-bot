@@ -82,6 +82,10 @@ VARIANTS = {
     # broke past the SL (the FVG was blown through). Does removing them raise win%/PF?
     "sane":      {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
                   "price_sanity_gate": True},
+    # CRYPTO (e.g. ETHUSDT, Binance): the live LIVE gold config (freshness + price-sanity)
+    # but 24/7 — ignore the gold kill-zone sessions since crypto trades around the clock.
+    "crypto":    {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
+                  "price_sanity_gate": True, "ignore_kill_zone": True},
 }
 
 

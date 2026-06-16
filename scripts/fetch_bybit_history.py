@@ -45,6 +45,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--timeframes", type=str, default="1m,5m,15m,1h,4h",
                    help="Comma-separated subset of 1m,5m,15m,1h,4h")
     p.add_argument("--db-path", type=str, default="data/database/trading_bot.sqlite")
+    p.add_argument("--symbol", type=str, default="XAUUSDT",
+                   help="Bybit linear perp symbol, e.g. ETHUSDT, SOLUSDT.")
     return p.parse_args()
 
 
@@ -120,7 +122,9 @@ def fetch_timeframe(session, tf: str, start_ms: int, end_ms: int, logger: System
 
 
 def main() -> None:
+    global SYMBOL
     args = _parse_args()
+    SYMBOL = args.symbol  # allow any Bybit linear perp (ETHUSDT, SOLUSDT, ...)
     start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
     end = (datetime.fromisoformat(args.end).replace(tzinfo=timezone.utc)
            if args.end else datetime.now(timezone.utc))
