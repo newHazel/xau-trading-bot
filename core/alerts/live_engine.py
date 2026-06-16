@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.engine.sequence_runner import SequenceRunner
-from core.alerts.telegram_sender import TelegramSender
+from core.alerts.telegram_sender import TelegramSender, ticker_label
 from core.monitoring.telegram_dedup import TelegramDedup
 from core.monitoring.heartbeat import HeartbeatManager
 from core.alerts.outcome_tracker import OutcomeTracker
@@ -71,7 +71,8 @@ class LiveAlertEngine:
         self._dedup = TelegramDedup({"max_dedup_history": 500})
         # forward paper-trade measurement (no effect on signals) — records each alert
         # and resolves it WIN/LOSS so we accumulate a real forward win%/PF/R record.
-        self._tracker = OutcomeTracker()
+        # Labelled with the ticker so multi-symbol fleets show which coin resolved.
+        self._tracker = OutcomeTracker(label=ticker_label(live.symbol))
         # near-miss telemetry: completed setups the bot REJECTED at a gate (+ why)
         self._near_miss = NearMissTracker()
         self._hb = HeartbeatManager({"interval_minutes": live.heartbeat_minutes, "enabled": True})
@@ -206,6 +207,25 @@ class LiveAlertEngine:
         except Exception:
             pass
         return self.check_once(history, now)
+
+    def run_cycle_silent(self) -> Optional[Any]:
+        """Like run_cycle but WITHOUT the per-engine heartbeat — used by the
+        multi-symbol crypto fleet, which sends ONE combined heartbeat at the fleet
+        level instead of N noisy per-coin ones."""
+        now = self._now_fn()
+        history = self.fetch_history(now)
+        try:  # resolve any open paper-trades against the newest bar (measurement only)
+            self._tracker.update(history.get(self._live.execution_tf), self._sender, now)
+        except Exception:
+            pass
+        return self.check_once(history, now)
+
+    def forward_summary(self) -> str:
+        """Running forward paper-trade record for this symbol (measurement only)."""
+        try:
+            return self._tracker.summary_line()
+        except Exception:
+            return ""
 
     # ------------------------------------------------------------------ #
 

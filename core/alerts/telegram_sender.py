@@ -62,8 +62,9 @@ class TelegramSender:
         direction = str(s.get("direction", "")).upper()
         arrow = "⬆️" if direction == "LONG" else "⬇️"
         rr = s.get("rr") or s.get("net_rr") or 0.0
+        ticker = ticker_label(s.get("symbol")) or "XAU"
         lines = [
-            f"{emoji} <b>XAU {direction}</b> {arrow}  —  Grade <b>{grade}</b>",
+            f"{emoji} <b>{ticker} {direction}</b> {arrow}  —  Grade <b>{grade}</b>",
             f"Setup: <code>{s.get('setup_id', '')}</code>",
             "",
             f"Entry: <b>{_fmt(s.get('entry'))}</b>",
@@ -79,8 +80,30 @@ class TelegramSender:
         return "\n".join(lines)
 
 
-def _fmt(v: Any) -> str:
+def fmt_price(v: Any) -> str:
+    """Adaptive price precision so cheap coins don't collapse to identical levels.
+    Gold/SOL/ETH (>=100) keep 2 decimals (byte-identical to before); LINK/NEAR
+    (1-100) get 4; sub-dollar coins like DOGE/SAND (<1) get 5."""
     try:
-        return f"{float(v):.2f}"
+        x = float(v)
     except (TypeError, ValueError):
         return "—"
+    a = abs(x)
+    if a >= 100:
+        return f"{x:.2f}"
+    if a >= 1:
+        return f"{x:.4f}"
+    return f"{x:.5f}"
+
+
+def ticker_label(symbol: Any) -> str:
+    """ETHUSDT -> ETH, XAUUSD -> XAU (clean ticker for alert headers/labels)."""
+    s = str(symbol or "").upper()
+    for suf in ("USDT", "USD"):
+        if s.endswith(suf):
+            return s[: -len(suf)]
+    return s
+
+
+# backward-compatible alias (was the only formatter before crypto support)
+_fmt = fmt_price

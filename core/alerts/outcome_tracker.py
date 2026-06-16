@@ -22,6 +22,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, List, Dict, Optional
 
+from core.alerts.telegram_sender import fmt_price
+
 
 class OutcomeTracker:
     # Low-win% strategy survival: at ~21% win/PF 1.57 a 6-loss streak is statistically
@@ -31,7 +33,8 @@ class OutcomeTracker:
     LOSING_STREAK_WARN_AT = 4
     BIG_WIN_R_THRESHOLD = 2.5
 
-    def __init__(self, max_open_hours: float = 48.0) -> None:
+    def __init__(self, max_open_hours: float = 48.0, label: str = "") -> None:
+        self._label = label  # short ticker (e.g. "ETH") shown on resolutions; "" for gold
         self._open: List[Dict[str, Any]] = []
         self.wins = 0
         self.losses = 0
@@ -133,9 +136,10 @@ class OutcomeTracker:
         if sender is None:
             return
         icon = "✅" if label == "WIN" else "🔴"
-        text = (f"{icon} <b>{label}</b> — {s['grade']} {s['dir']} @ {s['entry']:.2f} "
+        tag = f"{self._label} " if self._label else ""
+        text = (f"{icon} <b>{tag}{label}</b> — {s['grade']} {s['dir']} @ {fmt_price(s['entry'])} "
                 f"→ {'TP1' if label == 'WIN' else 'SL'} ({r:+.2f}R)\n"
-                f"📊 {self.summary_line()}")
+                f"📊 {tag}{self.summary_line()}")
         try:
             sender.send(text)
         except Exception:
