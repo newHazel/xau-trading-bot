@@ -22,7 +22,10 @@ JOBS="$(detect_cpus)"; [ "${JOBS:-0}" -lt 1 ] 2>/dev/null && JOBS=2; [ "${JOBS}"
 
 SYMBOLS="${SYMBOLS:-ETHUSDT DOGEUSDT SOLUSDT LINKUSDT AVAXUSDT NEARUSDT SUIUSDT SANDUSDT}"
 START="${START:-2026-03-01}"
-TOTAL_BARS="${TOTAL_BARS:-30000}"
+# Fast first read: 15000 bars 5m ≈ 7-8 weeks (~half the runtime of the full 30000).
+# Enough to see which coins have an edge (PF>1) with the now-correct costs; re-run a
+# promising coin at TOTAL_BARS=30000 (3.4 months) for the robust number.
+TOTAL_BARS="${TOTAL_BARS:-15000}"
 VARIANT="${VARIANT:-crypto_pct}"
 
 echo "=================================================================="
