@@ -117,6 +117,17 @@ def _gen_chunk(task):
     config variant, fed a warmup overlap. Checkpoints to disk."""
     label, overrides, real_start, real_end, warmup, window, symbol, exec_tf, db_path, out_dir = task
     t0 = time.time()
+    # Resume: if this chunk was already generated (e.g. on a persistent volume), reuse
+    # it instead of regenerating — signal gen is the slow part, scoring is cheap.
+    ckpt = os.path.join(out_dir, f"sig_{label}_{real_start:08d}.json")
+    if os.path.exists(ckpt):
+        try:
+            with open(ckpt) as f:
+                out = json.load(f)
+            print(f"  [{label} {real_start}-{real_end}] {len(out)} signals (cached)", flush=True)
+            return (label, out)
+        except Exception:
+            pass  # corrupt/partial checkpoint → regenerate
     db = get_db(db_path)
     full = {tf: _load(db, symbol, tf) for tf in _TFS}
     exec_df = full[exec_tf]
@@ -151,7 +162,7 @@ def _chunks(range_start, n, chunk_bars):
         cs += chunk_bars
 
 
-def _score(signals, exec_df, range_start, exec_tf):
+def _score(signals, exec_df, range_start, exec_tf, overrides=None):
     sigs = sorted(signals, key=lambda s: s["gpos"])
     fe = [{"setup_id": s["setup_id"], "direction": s["direction"], "entry": s["entry"],
            "sl": s["sl"], "tp1": s["tp1"], "tp2": s["tp2"], "lot_size": 0.1,
@@ -159,9 +170,20 @@ def _score(signals, exec_df, range_start, exec_tf):
     if not fe:
         return None
     exec_slice = exec_df.iloc[range_start:].copy()
+    # The fill engine's costs MUST match the variant's cost model. BacktestRunner only
+    # knows absolute spread/slippage, so for a "percent" variant we scale them to the
+    # coin's price level — else a cheap coin gets a gold-sized 0.35 cost that dwarfs its
+    # price-proportional risk, making win%=0 / expR=-800R (a PnL artefact, not a result).
+    costs_cfg = (overrides or {}).get("costs", {})
+    if str(costs_cfg.get("cost_model", "absolute")).lower() == "percent":
+        ref_price = float(exec_slice["close"].median())
+        spread = float(costs_cfg.get("spread_pct", 0.0)) * ref_price
+        slippage = float(costs_cfg.get("slippage_pct", 0.0)) * ref_price
+    else:
+        spread, slippage = 0.25, 0.10
     bt = BacktestRunner(BacktestConfig(
         initial_balance=10000.0, conservative_fills=True, costs_inclusive=True,
-        default_spread=0.25, default_slippage=0.10,
+        default_spread=spread, default_slippage=slippage,
         max_daily_trades=999, max_daily_losses=999, base_timeframe=exec_tf))
     return compute_metrics([t.to_dict() for t in bt.run(exec_slice, signals=fe).trades])
 
@@ -238,7 +260,7 @@ def main():
     print(f"  {'variant':<12}{'signals':>9}{'sig/mo':>8}{'win%':>8}{'PF':>7}{'expR':>9}{'totalR':>9}{'maxDD':>8}")
     metrics = {}
     for v in variants:
-        m = _score(by[v], exec_df, range_start, a.execution_tf)
+        m = _score(by[v], exec_df, range_start, a.execution_tf, VARIANTS[v])
         metrics[v] = m
         spm = len(by[v]) / _months
         if m is None:
