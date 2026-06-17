@@ -14,5 +14,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # App code
 COPY . .
 
-# Default: run the live alert loop. docker-compose overrides command per service.
-CMD ["python", "scripts/live_alerts.py"]
+# Default: run BOTH live bots (gold + crypto fleet) under one supervisor, each in
+# its own auto-restarting subprocess. docker-compose overrides command per service.
+CMD ["python", "scripts/live_all.py"]
