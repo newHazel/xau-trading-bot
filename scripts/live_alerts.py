@@ -36,6 +36,7 @@ from core.alerts.telegram_sender import TelegramSender
 from core.alerts.live_engine import LiveAlertEngine, LiveConfig
 from core.data.twelvedata_fetcher import TwelveDataFetcher
 from core.engine.pipeline_config import assemble_pipeline_config
+from core.monitoring.cycle_timing import seconds_until_next_mark
 
 DEFAULT_CONFIG = {
     "rr_tiers": {"min_to_enter": 2.0, "required_for_grade_b": 1.5,
@@ -119,7 +120,9 @@ def main() -> None:
                 # A 24/7 bot must survive transient failures (network blips, API
                 # timeouts/limits). Log and keep going — never let one cycle kill it.
                 print(f"\n[cycle {n}] error: {type(exc).__name__}: {exc} — continuing")
-            time.sleep(args.interval)
+            # Align to round clock marks (…:00, :05, :10 UTC) so each scan runs
+            # right after a candle closes, instead of drifting from start time.
+            time.sleep(seconds_until_next_mark(args.interval))
     except KeyboardInterrupt:
         print("\n(stopped)")
 

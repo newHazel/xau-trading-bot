@@ -46,6 +46,7 @@ from core.alerts.telegram_sender import TelegramSender, ticker_label
 from core.alerts.live_engine import LiveAlertEngine, LiveConfig
 from core.data.binance_fetcher import BinanceFetcher
 from core.engine.pipeline_config import assemble_pipeline_config
+from core.monitoring.cycle_timing import seconds_until_next_mark
 
 # The user's validated coin list (LIGHTUSDT does not exist on Binance → LINKUSDT).
 DEFAULT_SYMBOLS = [
@@ -192,7 +193,10 @@ def main() -> None:
                 except Exception:
                     pass
                 last_hb = now
-            time.sleep(args.interval)
+            # Align to round clock marks (…:00, :05, :10 UTC) so each scan runs
+            # right after the 5m candle closes. The hourly status heartbeat then
+            # also lands on a round mark.
+            time.sleep(seconds_until_next_mark(args.interval))
     except KeyboardInterrupt:
         print("\n(stopped)")
 
