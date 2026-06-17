@@ -45,6 +45,16 @@ class RRCalculator:
         self._commission = cost_config.get("commission_per_lot", 0.0)
         self._news_slip_mult = cost_config.get("news_slippage_multiplier", 3.0)
         self._high_vol_slip_mult = cost_config.get("high_volatility_slippage_multiplier", 2.0)
+        # Cost model. "absolute" (default) = fixed price units, calibrated for gold
+        # (~$4300). "percent" = scale spread/slippage with PRICE — required for crypto,
+        # where a coin priced $0.05 vs $1800 can't share one absolute cost. In percent
+        # mode the costs become spread_pct*entry + slippage_pct*entry.
+        self._cost_model = str(cost_config.get("cost_model", "absolute")).lower()
+        self._spread_pct = float(cost_config.get("spread_pct", 0.0))
+        self._slippage_pct = float(cost_config.get("slippage_pct", 0.0))
+        if self._cost_model == "percent" and (self._spread_pct + self._slippage_pct) <= 0:
+            print("[RRCalculator] WARNING: cost_model='percent' but spread_pct+slippage_pct<=0 "
+                  "— costs are zero (optimistic R:R). Did you forget the pct keys?")
 
     def calculate(
         self,
@@ -57,8 +67,14 @@ class RRCalculator:
         spread: Optional[float] = None,
     ) -> RRResult:
         direction = direction.strip().lower()
-        spread_cost = spread if spread is not None else self._spread
-        slippage = self._slippage
+        if self._cost_model == "percent":
+            # price-proportional costs (crypto): a $0.08 coin and a $1800 coin pay the
+            # SAME fraction, not the same absolute. An explicit spread overrides.
+            spread_cost = spread if spread is not None else self._spread_pct * abs(entry)
+            slippage = self._slippage_pct * abs(entry)
+        else:
+            spread_cost = spread if spread is not None else self._spread
+            slippage = self._slippage
 
         if is_news_time:
             slippage *= self._news_slip_mult

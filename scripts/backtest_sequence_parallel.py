@@ -86,6 +86,14 @@ VARIANTS = {
     # but 24/7 — ignore the gold kill-zone sessions since crypto trades around the clock.
     "crypto":    {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
                   "price_sanity_gate": True, "ignore_kill_zone": True},
+    # CRYPTO with PRICE-PROPORTIONAL costs (the fix): the absolute 0.25/0.10 cost model
+    # is gold-calibrated and auto-rejects cheap coins (rr_minimum + spread filter both
+    # fail → grade D). 'crypto_pct' scales spread/slippage with price (~0.04% total) so
+    # every coin pays the same fraction. THIS is the variant to judge crypto edge on.
+    "crypto_pct": {"fvg_freshness_enabled": True, "fvg_direction_aware": False, "require_zone_rejection": False,
+                   "price_sanity_gate": True, "ignore_kill_zone": True,
+                   "costs": {"cost_model": "percent", "spread_pct": 0.0002, "slippage_pct": 0.0002},
+                   "spread": {"cost_model": "percent", "spread_pct": 0.0002}},
 }
 
 

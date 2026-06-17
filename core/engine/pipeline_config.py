@@ -41,7 +41,7 @@ def assemble_pipeline_config(config_dir: str = "config") -> Dict[str, Any]:
         "session": raw.get("sessions", {}),     # SessionFilter ← kill-zone hours
         "news": raw.get("news", {}),             # NewsFilter
         "dxy": smc,                              # DXYFilter (dxy_required, lookback)
-        "spread": costs,                         # SpreadFilter
+        "spread": dict(costs),                   # SpreadFilter (own dict — never alias costs)
         "correlation": smc,                     # CorrelationSpikeFilter
         "volatility": raw.get("volatility", {}),
         "market_state": raw.get("market_state", {}),

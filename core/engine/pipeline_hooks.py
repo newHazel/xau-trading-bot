@@ -448,7 +448,10 @@ def make_filter_hook(config: Optional[Dict[str, Any]] = None,
         if df is not None:
             atr = compute_atr(df)
             # Tick data has no real spread column → use the configured default + ATR cap.
-            spread_ok = spread_f.is_trade_allowed(spread=None, atr=atr)
+            # Pass price so "percent" cost mode can derive a price-proportional spread
+            # (a $0.08 coin must not be judged by a gold-sized absolute spread).
+            price = float(df["close"].iloc[-1])
+            spread_ok = spread_f.is_trade_allowed(spread=None, atr=atr, price=price)
             vol_ok = vol_f.is_trade_allowed(atr_series(df))
             state_ok = state_f.is_trade_allowed(
                 highs=df["high"].astype(float).tolist(),

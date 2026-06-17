@@ -63,6 +63,14 @@ CRYPTO_OVERRIDES = {
     "ignore_kill_zone": True,    # crypto is 24/7 — no gold session kill-zones
 }
 
+# Percentage-of-price cost model. The default absolute costs (spread 0.25 + slippage
+# 0.10) are calibrated for gold (~$4300) and wrongly reject every cheap coin: the R:R
+# gate collapses and the spread filter blocks (e.g. on DOGE the 0.35 cost is ~1800× the
+# ATR). Scaling spread/slippage with PRICE makes all coins pay the same fraction (~0.04%
+# total) — gold keeps its absolute model (separate service). Tune + validate via backtest.
+CRYPTO_SPREAD_PCT = 0.0002
+CRYPTO_SLIPPAGE_PCT = 0.0002
+
 DEFAULT_CONFIG = {
     "rr_tiers": {"min_to_enter": 2.0, "required_for_grade_b": 1.5,
                  "required_for_grade_a": 2.0, "required_for_grade_a_plus": 2.5},
@@ -93,6 +101,13 @@ def _build_config() -> dict:
         print(f"[config] WARNING: using minimal fallback ({exc})")
         cfg = dict(DEFAULT_CONFIG)
     cfg.update(CRYPTO_OVERRIDES)  # scalar bools — plain override matches the backtest
+    # price-proportional costs so cheap coins aren't auto-rejected (rr_minimum +
+    # spread filter). Merge into BOTH sub-dicts the engine reads (costs → RR calc,
+    # spread → spread filter), preserving any existing keys.
+    cfg["costs"] = {**cfg.get("costs", {}), "cost_model": "percent",
+                    "spread_pct": CRYPTO_SPREAD_PCT, "slippage_pct": CRYPTO_SLIPPAGE_PCT}
+    cfg["spread"] = {**cfg.get("spread", {}), "cost_model": "percent",
+                     "spread_pct": CRYPTO_SPREAD_PCT}
     return cfg
 
 
