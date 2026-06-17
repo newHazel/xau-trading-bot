@@ -17,12 +17,15 @@ from __future__ import annotations
 import html
 from typing import Any, Dict, Optional
 
+from core.alerts.telegram_sender import fmt_price
+
 
 class NearMissTracker:
-    def __init__(self, notify: bool = True) -> None:
+    def __init__(self, notify: bool = True, label: str = "") -> None:
         self.by_reason: Dict[str, int] = {}
         self.total = 0
         self._notify_enabled = notify
+        self._label = label  # short ticker (e.g. "ETH") shown per note; "" for gold
 
     def record(self, nm: Dict[str, Any], sender: Any = None) -> None:
         reason = str(nm.get("reason", "?"))
@@ -43,15 +46,17 @@ class NearMissTracker:
             return
         entry = nm.get("entry")
         rr = nm.get("rr")
-        ep = f" @ {entry:.2f}" if isinstance(entry, (int, float)) else ""
+        # adaptive precision so a cheap coin (DOGE @ 0.087) isn't shown as "@ 0.09"
+        ep = f" @ {fmt_price(entry)}" if isinstance(entry, (int, float)) else ""
         rrp = f", R:R {rr:.1f}" if isinstance(rr, (int, float)) else ""
         # This message uses HTML, but reason/grade/direction are free-form (e.g. the
         # reason "R:R < 2 net" contains a '<'). Escape them so Telegram's HTML parser
         # doesn't reject the whole message and silently drop the note.
+        tag = html.escape(self._label) + " " if self._label else ""
         grade = html.escape(str(nm.get("grade", "?")))
         direction = html.escape(str(nm.get("direction", "?")))
         reason = html.escape(str(nm.get("reason", "?")))
-        text = (f"⚪ <b>Near-miss</b> — {grade} {direction}{ep} "
+        text = (f"⚪ <b>{tag}Near-miss</b> — {grade} {direction}{ep} "
                 f"completed but skipped: <b>{reason}</b>{rrp}")
         try:
             sender.send(text)

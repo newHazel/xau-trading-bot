@@ -73,8 +73,9 @@ class LiveAlertEngine:
         # and resolves it WIN/LOSS so we accumulate a real forward win%/PF/R record.
         # Labelled with the ticker so multi-symbol fleets show which coin resolved.
         self._tracker = OutcomeTracker(label=ticker_label(live.symbol))
-        # near-miss telemetry: completed setups the bot REJECTED at a gate (+ why)
-        self._near_miss = NearMissTracker()
+        # near-miss telemetry: completed setups the bot REJECTED at a gate (+ why),
+        # labelled with the ticker so multi-symbol fleets show which coin nearly fired.
+        self._near_miss = NearMissTracker(label=ticker_label(live.symbol))
         self._hb = HeartbeatManager({"interval_minutes": live.heartbeat_minutes, "enabled": True})
         self._hb_started = False
         self._alerts_sent = 0
