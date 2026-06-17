@@ -97,18 +97,28 @@ class TestHeartbeat:
         assert sent is True            # startup heartbeat fires immediately
         assert len(sender.sent) == 1
 
-    def test_due_after_interval(self):
+    def test_due_on_new_round_hour(self):
         sender = _CapturingSender()
         eng = _engine(sender=sender)
-        eng.maybe_heartbeat(now=NOW)                        # startup (1)
-        sent = eng.maybe_heartbeat(now=NOW + timedelta(minutes=61))
-        assert sent is True                                 # interval (2)
+        eng.maybe_heartbeat(now=NOW)                        # startup 16:00 (1)
+        sent = eng.maybe_heartbeat(now=NOW + timedelta(minutes=61))  # 17:01 → new hour
+        assert sent is True                                 # (2)
         assert len(sender.sent) == 2
 
-    def test_not_due_before_interval(self):
+    def test_not_due_within_same_hour(self):
         eng = _engine()
-        eng.maybe_heartbeat(now=NOW)                        # startup
-        assert eng.maybe_heartbeat(now=NOW + timedelta(minutes=10)) is False
+        eng.maybe_heartbeat(now=NOW)                        # startup 16:00
+        assert eng.maybe_heartbeat(now=NOW + timedelta(minutes=10)) is False  # 16:10
+
+    def test_fires_once_per_round_hour(self):
+        sender = _CapturingSender()
+        eng = _engine(sender=sender)
+        eng.maybe_heartbeat(now=NOW)                                          # 16:00 startup
+        assert eng.maybe_heartbeat(now=NOW + timedelta(minutes=30)) is False  # 16:30
+        assert eng.maybe_heartbeat(now=NOW + timedelta(minutes=60)) is True   # 17:00
+        assert eng.maybe_heartbeat(now=NOW + timedelta(minutes=90)) is False  # 17:30
+        assert eng.maybe_heartbeat(now=NOW + timedelta(minutes=125)) is True  # 18:05
+        assert len(sender.sent) == 3                                          # 16:00, 17:00, 18:05
 
     def test_heartbeat_survives_html_special_chars_in_near_miss(self):
         # Regression: a near-miss reason like "R:R < 2 net" contains '<'. When the

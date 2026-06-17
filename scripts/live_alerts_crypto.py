@@ -46,7 +46,7 @@ from core.alerts.telegram_sender import TelegramSender, ticker_label
 from core.alerts.live_engine import LiveAlertEngine, LiveConfig
 from core.data.binance_fetcher import BinanceFetcher
 from core.engine.pipeline_config import assemble_pipeline_config
-from core.monitoring.cycle_timing import seconds_until_next_mark
+from core.monitoring.cycle_timing import seconds_until_next_mark, top_of_hour_key
 
 # The user's validated coin list (LIGHTUSDT does not exist on Binance → LINKUSDT).
 DEFAULT_SYMBOLS = [
@@ -88,7 +88,6 @@ def _parse_args() -> argparse.Namespace:
                    help="Comma-separated Binance symbols. Default: the validated list.")
     p.add_argument("--execution-tf", default="5m")
     p.add_argument("--interval", type=int, default=300, help="Seconds between cycles.")
-    p.add_argument("--heartbeat-minutes", type=int, default=60)
     p.add_argument("--once", action="store_true", help="Run a single cycle and exit.")
     p.add_argument("--db-path", default="data/database/trading_bot.sqlite")
     return p.parse_args()
@@ -188,10 +187,10 @@ def main() -> None:
         print("\n(single cycle done)")
         return
 
-    # heartbeat scheduling: one consolidated fleet heartbeat (startup + every N min)
-    last_hb = datetime.now(timezone.utc)
+    # one consolidated fleet heartbeat on STARTUP, then on each ROUND clock hour.
+    last_hb_hour = top_of_hour_key()
     if sender.is_configured:
-        fleet_heartbeat(last_hb)
+        fleet_heartbeat(datetime.now(timezone.utc))
 
     n = 0
     try:
@@ -202,15 +201,15 @@ def main() -> None:
             except Exception as exc:
                 print(f"\n[cycle {n}] fleet error: {type(exc).__name__}: {exc} — continuing")
             now = datetime.now(timezone.utc)
-            if sender.is_configured and (now - last_hb).total_seconds() >= args.heartbeat_minutes * 60:
+            hk = top_of_hour_key(now)
+            if sender.is_configured and hk != last_hb_hour:  # crossed into a new round hour
                 try:
                     fleet_heartbeat(now)
                 except Exception:
                     pass
-                last_hb = now
-            # Align to round clock marks (…:00, :05, :10 UTC) so each scan runs
-            # right after the 5m candle closes. The hourly status heartbeat then
-            # also lands on a round mark.
+                last_hb_hour = hk
+            # Align each scan to round clock marks (…:00, :05, :10 UTC) so it runs
+            # right after the 5m candle closes; the heartbeat lands on the round hour.
             time.sleep(seconds_until_next_mark(args.interval))
     except KeyboardInterrupt:
         print("\n(stopped)")

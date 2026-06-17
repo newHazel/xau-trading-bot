@@ -23,6 +23,7 @@ from core.engine.sequence_runner import SequenceRunner
 from core.alerts.telegram_sender import TelegramSender, ticker_label
 from core.monitoring.telegram_dedup import TelegramDedup
 from core.monitoring.heartbeat import HeartbeatManager
+from core.monitoring.cycle_timing import top_of_hour_key
 from core.alerts.outcome_tracker import OutcomeTracker
 from core.alerts.near_miss_tracker import NearMissTracker
 
@@ -78,6 +79,7 @@ class LiveAlertEngine:
         self._near_miss = NearMissTracker(label=ticker_label(live.symbol))
         self._hb = HeartbeatManager({"interval_minutes": live.heartbeat_minutes, "enabled": True})
         self._hb_started = False
+        self._last_hb_hour = None  # heartbeat fires on startup + each round clock hour
         self._alerts_sent = 0
         self._trades_today = 0
         self._htf_cache: Dict[str, Any] = {}
@@ -180,23 +182,25 @@ class LiveAlertEngine:
         if not self._hb_started:
             self._hb.start(now)
             self._hb_started = True
-        # First call after start is "due" → sends a startup heartbeat, then resets
-        # the clock so the next one fires only after the configured interval.
-        if self._hb.is_due(now):
-            msg = self._hb.generate(state, health, self._trades_today, now)
-            text = msg.format_telegram()
-            try:  # show the running forward record + near-miss tally (measurement only)
-                text += "\n\n📊 " + self._tracker.summary_line()
-                text += "\n⚪ " + self._near_miss.summary_line()
-            except Exception:
-                pass
-            # Plain text: the heartbeat carries no markup, and it embeds free-form
-            # strings (near-miss reasons like "R:R < 2 net") that contain HTML-special
-            # chars. Sending as HTML lets a stray '<' make Telegram reject the whole
-            # message, which silently kills the heartbeat. parse_mode="" = no parsing.
-            self._sender.send(text, parse_mode="")
-            return True
-        return False
+        # Fire on startup (first call) and then once per ROUND clock hour (12:00,
+        # 13:00 … UTC), instead of drifting a fixed interval from process start.
+        hk = top_of_hour_key(now)
+        if self._last_hb_hour is not None and hk == self._last_hb_hour:
+            return False
+        self._last_hb_hour = hk
+        msg = self._hb.generate(state, health, self._trades_today, now)
+        text = msg.format_telegram()
+        try:  # show the running forward record + near-miss tally (measurement only)
+            text += "\n\n📊 " + self._tracker.summary_line()
+            text += "\n⚪ " + self._near_miss.summary_line()
+        except Exception:
+            pass
+        # Plain text: the heartbeat carries no markup, and it embeds free-form
+        # strings (near-miss reasons like "R:R < 2 net") that contain HTML-special
+        # chars. Sending as HTML lets a stray '<' make Telegram reject the whole
+        # message, which silently kills the heartbeat. parse_mode="" = no parsing.
+        self._sender.send(text, parse_mode="")
+        return True
 
     def run_cycle(self) -> Optional[Any]:
         """One full cycle: fetch → check → heartbeat. Returns a signal if alerted."""

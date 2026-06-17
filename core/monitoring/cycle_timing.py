@@ -38,3 +38,11 @@ def seconds_until_next_mark(
     if wait <= 0:  # buffer overshot the mark (only if buffer >= step) — clamp forward
         wait += step
     return wait
+
+
+def top_of_hour_key(now: Optional[datetime] = None):
+    """A value that changes exactly once per ROUND clock hour (UTC). Fire a
+    once-an-hour event (e.g. heartbeat) when this key differs from the last one
+    you sent on — so it lands on 12:00, 13:00 … instead of drifting from startup."""
+    now = now or datetime.now(timezone.utc)
+    return (now.year, now.month, now.day, now.hour)

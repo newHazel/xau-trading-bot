@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone, timedelta
 
-from core.monitoring.cycle_timing import seconds_until_next_mark
+from core.monitoring.cycle_timing import seconds_until_next_mark, top_of_hour_key
 
 
 def _at(s: str) -> datetime:
@@ -40,3 +40,11 @@ def test_zero_buffer_lands_exactly_on_mark():
     now = _at("2026-06-17 06:02:00")
     fire = now + timedelta(seconds=seconds_until_next_mark(300, 0.0, now))
     assert (fire.minute, fire.second) == (5, 0)
+
+
+def test_top_of_hour_key_changes_only_across_hours():
+    # same hour → same key (no heartbeat); next hour → different key (heartbeat)
+    assert top_of_hour_key(_at("2026-06-17 06:00:05")) == top_of_hour_key(_at("2026-06-17 06:55:00"))
+    assert top_of_hour_key(_at("2026-06-17 06:55:00")) != top_of_hour_key(_at("2026-06-17 07:00:05"))
+    # different day, same hour-of-day → different key
+    assert top_of_hour_key(_at("2026-06-17 06:30:00")) != top_of_hour_key(_at("2026-06-18 06:30:00"))
