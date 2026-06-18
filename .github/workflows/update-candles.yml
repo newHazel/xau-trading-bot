@@ -1,0 +1,58 @@
+name: update-candles
+
+# Keep the committed candle CSVs current automatically. Runs the collector on a
+# schedule, which fetches the latest CLOSED candles for all coins × timeframes and
+# APPENDS any new ones (deduped), then commits + pushes if anything changed.
+#
+# Note on cadence: GitHub cron is best-effort (can be delayed/skipped under load), but
+# the collector BACKFILLS — each run appends every candle missing since the last run —
+# so no 5m candle is ever lost even if a run is late. The cron frequency only controls
+# how often the repo is updated, NOT the candle granularity. */15 keeps commits sane;
+# change to "*/5 * * * *" for near-real-time or "0 * * * *" (hourly) for fewer commits.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}        # manual "Run workflow" button
+
+permissions:
+  contents: write              # lets the built-in GITHUB_TOKEN push
+
+concurrency:
+  group: update-candles        # never let two runs push at once
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install minimal deps
+        run: pip install --quiet pandas requests python-dotenv
+
+      - name: Append newly-closed candles
+        run: python scripts/update_candles_csv.py --once
+
+      - name: Commit + push if changed
+        run: |
+          git config user.name  "candle-bot"
+          git config user.email "candle-bot@users.noreply.github.com"
+          git add data/candles
+          if git diff --cached --quiet; then
+            echo "no new candles — nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore(data): candle update $(date -u +%Y-%m-%dT%H:%MZ)"
+          # rebase-retry in case master moved between checkout and push
+          for i in 1 2 3; do
+            if git push; then exit 0; fi
+            echo "push rejected — rebasing and retrying ($i)"
+            git pull --rebase --autostash origin master || true
+          done
+          echo "push failed after retries" >&2
+          exit 1
