@@ -99,6 +99,16 @@ VARIANTS = {
 
 
 def _load(db, sym, tf):
+    # Prefer the committed per-coin CSV (data/candles/<SYM>/<tf>.csv) — it ships with
+    # the repo, so the server has the OHLCV on deploy with NO download and it survives
+    # restarts. Fall back to the SQLite DB if the CSV isn't present.
+    csv = _ROOT / "data" / "candles" / sym / f"{tf}.csv"
+    if csv.exists():
+        df = pd.read_csv(csv)
+        if df.empty:
+            return pd.DataFrame()
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+        return df.set_index("timestamp").sort_index()
     rows = db.fetchall("SELECT timestamp,open,high,low,close,volume FROM candles "
                        "WHERE symbol=? AND timeframe=? ORDER BY timestamp ASC", (sym, tf))
     if not rows:

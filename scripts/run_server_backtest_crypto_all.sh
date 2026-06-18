@@ -66,25 +66,17 @@ for SYM in ${SYMBOLS}; do
   echo
   echo ">>>>>>>>>>>>>>>>>>>>>>>>  ${SYM}  <<<<<<<<<<<<<<<<<<<<<<<<"
 
-  if [ -z "$AGG" ]; then
-    echo ">>> [1/3] fetching ${SYM} (INSERT OR IGNORE — cached rows on the volume are skipped)"
+  if [ -n "$AGG" ]; then
+    echo ">>> [re-score] using cached signals in ${OUT_DIR} (no fetch, no generation)"
+  elif [ -f "data/candles/${SYM}/5m.csv" ]; then
+    echo ">>> [data] using committed CSVs in data/candles/${SYM}/ (no download)"
+  else
+    echo ">>> [data] no committed CSV — fetching ${SYM} from Binance"
     python scripts/fetch_binance_history.py --symbol "${SYM}" --start "${START}" \
       --timeframes 4h,1h,15m,5m --db-path "${DB_PATH}" || { echo "!! fetch failed — skipping ${SYM}"; continue; }
-    echo ">>> [2/3] sanity: every timeframe must have data"
-    python - "$SYM" "$DB_PATH" <<'PY' || { echo "!! insufficient data — skipping ${SYM}"; continue; }
-import sys
-from core.logging.db import get_db
-sym, dbp = sys.argv[1], sys.argv[2]
-db = get_db(dbp)
-bad = [tf for tf in ("4h","1h","15m","5m")
-       if db.fetchone("SELECT COUNT(*) AS n FROM candles WHERE symbol=? AND timeframe=?", (sym, tf))["n"] < 300]
-print(f"    {sym}: " + ("OK" if not bad else f"MISSING {bad}")); sys.exit(1 if bad else 0)
-PY
-  else
-    echo ">>> [re-score] using cached signals in ${OUT_DIR} (no fetch, no generation)"
   fi
 
-  echo ">>> [3/3] backtest ${SYM} (${VARIANT})"
+  echo ">>> [backtest] ${SYM} (${VARIANT})"
   python -u scripts/backtest_sequence_parallel.py --symbol "${SYM}" --execution-tf 5m \
     --total-bars "${TOTAL_BARS}" --chunk-bars "${CHUNK_BARS}" --jobs "${JOBS}" \
     --variants "${VARIANT}" --db-path "${DB_PATH}" --out-dir "${OUT_DIR}" ${AGG}
