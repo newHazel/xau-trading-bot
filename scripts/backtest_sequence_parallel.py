@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -231,9 +232,13 @@ def main():
     if a.aggregate_only:
         by = {v: [] for v in variants}
         for fn in sorted(os.listdir(a.out_dir)):
-            if not fn.startswith("sig_"):
+            # filename is sig_<label>_<8-digit-start>.json; the label itself may contain
+            # underscores (e.g. "crypto_pct"), so strip the prefix + numeric suffix
+            # instead of naively splitting on "_".
+            m = re.match(r"^sig_(.+)_(\d{8})\.json$", fn)
+            if not m:
                 continue
-            lbl = fn.split("_")[1]
+            lbl = m.group(1)
             if lbl in by:
                 with open(os.path.join(a.out_dir, fn)) as f:
                     by[lbl].extend(json.load(f))
