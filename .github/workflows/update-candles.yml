@@ -7,12 +7,13 @@ name: update-candles
 # Note on cadence: GitHub cron is best-effort (can be delayed/skipped under load), but
 # the collector BACKFILLS — each run appends every candle missing since the last run —
 # so no 5m candle is ever lost even if a run is late. The cron frequency only controls
-# how often the repo is updated, NOT the candle granularity. */15 keeps commits sane;
-# change to "*/5 * * * *" for near-real-time or "0 * * * *" (hourly) for fewer commits.
+# how often the repo is updated, NOT the candle granularity. Hourly = 24 commits/day
+# and still captures every 5m candle (backfill); use "*/15 * * * *" or "*/5 * * * *"
+# for fresher commits if you ever need it.
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "0 * * * *"
   workflow_dispatch: {}        # manual "Run workflow" button
 
 permissions:
