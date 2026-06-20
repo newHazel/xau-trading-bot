@@ -54,6 +54,7 @@ DEFAULT_SYMBOLS = [
     "AVAXUSDT", "NEARUSDT", "SUIUSDT", "SANDUSDT",
     "ZECUSDT",                 # Zcash (spot)
     "HYPEUSDT",                # Hyperliquid — Binance FUTURES only (spot fallback handles it)
+    "LIGHTUSDT",               # Light — Binance FUTURES only (futures fallback)
 ]
 
 # EXACT overrides of the backtest "crypto" variant, so live == validated backtest.
