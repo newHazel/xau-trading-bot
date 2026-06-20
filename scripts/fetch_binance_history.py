@@ -34,8 +34,13 @@ SOURCE = "binance"
 _TF = {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h"}
 _TF_MS = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000}
 _MAX_LIMIT = 1000
-# main API host first; data-only host as a fallback (often un-geo-blocked).
-_HOSTS = ["https://api.binance.com", "https://data-api.binance.vision"]
+# Spot hosts first; USD-M FUTURES last as a fallback for symbols not listed on spot
+# (e.g. HYPEUSDT). Futures klines share the spot array format. (base_url, klines_path)
+_ENDPOINTS = [
+    ("https://api.binance.com", "/api/v3/klines"),
+    ("https://data-api.binance.vision", "/api/v3/klines"),
+    ("https://fapi.binance.com", "/fapi/v1/klines"),
+]
 
 
 def _headers() -> dict:
@@ -45,17 +50,17 @@ def _headers() -> dict:
 
 def _get_klines(symbol: str, interval: str, start_ms: int, headers: dict) -> list:
     last = None
-    for host in _HOSTS:
+    for base, path in _ENDPOINTS:
         try:
-            r = requests.get(f"{host}/api/v3/klines",
+            r = requests.get(f"{base}{path}",
                              params={"symbol": symbol, "interval": interval,
                                      "startTime": start_ms, "limit": _MAX_LIMIT},
                              headers=headers, timeout=20)
             if r.status_code == 200:
                 return r.json()
-            last = f"{host} HTTP {r.status_code}: {r.text[:140]}"
-        except Exception as exc:  # network / timeout — try the next host
-            last = f"{host}: {exc}"
+            last = f"{base} HTTP {r.status_code}: {r.text[:140]}"
+        except Exception as exc:  # network / timeout — try the next endpoint
+            last = f"{base}: {exc}"
     raise RuntimeError(last)
 
 

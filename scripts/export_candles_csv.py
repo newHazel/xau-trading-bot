@@ -32,7 +32,8 @@ import pandas as pd
 from core.logging.db import get_db
 
 DEFAULT_SYMBOLS = ["ETHUSDT", "DOGEUSDT", "SOLUSDT", "LINKUSDT",
-                   "AVAXUSDT", "NEARUSDT", "SUIUSDT", "SANDUSDT"]
+                   "AVAXUSDT", "NEARUSDT", "SUIUSDT", "SANDUSDT",
+                   "ZECUSDT", "HYPEUSDT"]
 TFS = ["4h", "1h", "15m", "5m"]
 
 

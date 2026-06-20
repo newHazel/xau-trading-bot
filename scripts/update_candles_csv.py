@@ -38,7 +38,8 @@ from core.data.binance_fetcher import BinanceFetcher
 from core.monitoring.cycle_timing import seconds_until_next_mark
 
 DEFAULT_SYMBOLS = ["ETHUSDT", "DOGEUSDT", "SOLUSDT", "LINKUSDT",
-                   "AVAXUSDT", "NEARUSDT", "SUIUSDT", "SANDUSDT"]
+                   "AVAXUSDT", "NEARUSDT", "SUIUSDT", "SANDUSDT",
+                   "ZECUSDT", "HYPEUSDT"]
 TFS = ["4h", "1h", "15m", "5m"]
 COLS = ["timestamp", "open", "high", "low", "close", "volume"]
 

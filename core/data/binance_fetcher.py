@@ -22,7 +22,14 @@ import requests
 from core.data.data_fetcher import FetchResult, FetcherStatus
 
 _TF = {"1m": "1m", "5m": "5m", "15m": "15m", "1h": "1h", "4h": "4h"}
-_HOSTS = ["https://api.binance.com", "https://data-api.binance.vision"]
+# Spot first (the 9 spot coins), then USD-M FUTURES as a fallback for symbols not
+# listed on spot (e.g. HYPEUSDT). Futures klines share the spot array format, so
+# _parse handles both. (base_url, klines_path)
+_ENDPOINTS = [
+    ("https://api.binance.com", "/api/v3/klines"),
+    ("https://data-api.binance.vision", "/api/v3/klines"),
+    ("https://fapi.binance.com", "/fapi/v1/klines"),
+]
 _MAX_LIMIT = 1000
 
 
@@ -61,24 +68,24 @@ class BinanceFetcher:
                                error_message=f"Unsupported timeframe: {timeframe}")
         limit = min(int(count) + 2, _MAX_LIMIT)  # +2: we drop the forming bar
         last_err: Optional[str] = None
-        for host in _HOSTS:
+        for base, path in _ENDPOINTS:
             try:
-                resp = requests.get(f"{host}/api/v3/klines",
+                resp = requests.get(f"{base}{path}",
                                     params={"symbol": symbol, "interval": interval, "limit": limit},
                                     headers=self._headers(), timeout=20)
                 if resp.status_code != 200:
-                    last_err = f"{host} HTTP {resp.status_code}: {resp.text[:120]}"
+                    last_err = f"{base} HTTP {resp.status_code}: {resp.text[:120]}"
                     continue
                 df = self._parse(resp.json())
                 if df.empty:
-                    last_err = f"{host}: no data"
+                    last_err = f"{base}: no data"
                     continue
                 # drop the in-progress (forming) bar → only CLOSED candles
                 df = df[df.index < pd.Timestamp(datetime.now(timezone.utc))]
                 return FetchResult(status=FetcherStatus.OK, data=df, source=self.source_name,
                                    latency_ms=(time.monotonic() - t0) * 1000)
-            except Exception as exc:  # network/timeout → try the fallback host
-                last_err = f"{host}: {exc}"
+            except Exception as exc:  # network/timeout → try the next endpoint
+                last_err = f"{base}: {exc}"
         return FetchResult(status=FetcherStatus.ERROR, data=None, source=self.source_name,
                            error_message=last_err or "fetch failed",
                            latency_ms=(time.monotonic() - t0) * 1000)

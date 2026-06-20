@@ -52,6 +52,8 @@ from core.monitoring.cycle_timing import seconds_until_next_mark, top_of_hour_ke
 DEFAULT_SYMBOLS = [
     "ETHUSDT", "DOGEUSDT", "SOLUSDT", "LINKUSDT",
     "AVAXUSDT", "NEARUSDT", "SUIUSDT", "SANDUSDT",
+    "ZECUSDT",                 # Zcash (spot)
+    "HYPEUSDT",                # Hyperliquid — Binance FUTURES only (spot fallback handles it)
 ]
 
 # EXACT overrides of the backtest "crypto" variant, so live == validated backtest.
