@@ -49,6 +49,10 @@ def main() -> None:
     p.add_argument("--n-folds", type=int, default=4)
     p.add_argument("--out-dir", default=str(_ROOT / "data" / "processed" / "ml"))
     p.add_argument("--min-samples", type=int, default=MIN_SAMPLES)
+    p.add_argument("--r-column", default="auto", choices=["auto", "net_r", "win_r"],
+                   help="Realized-R column to SCORE the edge table by. 'auto' prefers net_r "
+                        "(cost-aware but understates TP1-then-SL); 'win_r' matches the model's "
+                        "tp1_before_sl target exactly (win=+~2R, loss=-1R).")
     a = p.parse_args()
 
     df = T.load_dataset(a.dataset)
@@ -80,7 +84,9 @@ def main() -> None:
         sys.exit(1)
 
     # --- edge evaluation: sweep thresholds, score by realized R ---
-    r_col = T.pick_r_column(res)
+    r_col = T.pick_r_column(res) if a.r_column == "auto" else a.r_column
+    if r_col not in res.columns:
+        r_col = T.pick_r_column(res)
     r = res[r_col].to_numpy(dtype=float)
     sweep = T.threshold_sweep(oos, r)
     print(f"\n  EDGE TABLE (realized R from '{r_col}'; row tau=0.00 = BASELINE = take all):")
