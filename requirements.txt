@@ -3,6 +3,11 @@ pandas>=2.0.0
 numpy>=1.24.0
 pyaml>=23.0.0
 python-dotenv>=1.0.0
+# Some base images (e.g. RunPod) ship an OLD python-dateutil that imports `six.moves`
+# without installing six → `import pandas` crashes on a fresh clone. Pin a modern dateutil
+# + six so `pip install -r requirements.txt` is self-sufficient. (Harmless for the live image.)
+python-dateutil>=2.9.0
+six>=1.16.0
 
 # Data Sources
 oandapyV20>=0.7.0
