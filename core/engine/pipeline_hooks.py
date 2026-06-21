@@ -339,7 +339,9 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
         chosen_fvg = select_fvg(candidates, df, config)
         ctx.fvg = chosen_fvg
         ctx.fvg_valid = chosen_fvg is not None
-        ctx.fvg_fresh = chosen_fvg is not None  # unmitigated by construction
+        ctx.fvg_fresh = chosen_fvg is not None  # mandatory fvg_freshness: a tradeable zone exists
+        # (The optional fvg_fresh BOOSTER is derived separately from the TRADED zone's state
+        #  in SignalPipeline._build_optional — genuine 'fresh' vs 'tapped'/'partial' — bug #11.)
         if chosen_fvg is not None:
             # --- retrace into the FVG zone + confirmation candle ---
             # NOTE: ctx.retraced_to_zone here is computed against the FRESHLY

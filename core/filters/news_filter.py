@@ -167,42 +167,44 @@ class NewsFilter:
                 max_grade=None,
             )
 
+        # BLOCK if ANY event is inside its OWN block window — not just the nearest one.
+        # A nearer non-blocking event (tier-4 with block=0, or a tier-3 just outside its
+        # window) must NOT mask a farther FOMC/NFP blackout. Pick the most-imminent
+        # blocking event for the message.
+        blk_event: Optional[NewsEvent] = None
+        blk_tier = None
+        blk_dir = None
+        blk_abs: Optional[float] = None
+        blk_signed: Optional[float] = None
+        for event in self._events:
+            tcfg = self._tiers.classify(event.title) or self._tiers.get_tier(event.tier)
+            if tcfg is None or not (tcfg.block_before_minutes > 0 or tcfg.block_after_minutes > 0):
+                continue
+            d = (event.event_time - dt).total_seconds() / 60
+            before = d > 0
+            am = abs(d)
+            hit = (before and am <= tcfg.block_before_minutes) or \
+                  ((not before) and am <= tcfg.block_after_minutes)
+            if hit and (blk_abs is None or am < blk_abs):
+                blk_event, blk_tier, blk_dir, blk_abs, blk_signed = \
+                    event, tcfg.tier, ("before" if before else "after"), am, d
+
+        if blk_event is not None:
+            return NewsResult(
+                status=NewsStatus.BLOCKED,
+                nearest_event=blk_event,
+                nearest_tier=blk_tier,
+                minutes_to_nearest=blk_signed,
+                block_reason=f"tier {blk_tier} event '{blk_event.title}' — {int(blk_abs)}min {blk_dir}",
+                max_grade=None,
+            )
+
+        # Not blocked: DEGRADE the grade if the NEAREST event's tier degrades (advisory,
+        # caps the grade label only — not safety-critical like the block check above).
         tier_cfg = self._tiers.classify(nearest_event.title)
         if tier_cfg is None:
             tier_cfg = self._tiers.get_tier(nearest_event.tier)
-
-        if tier_cfg is None:
-            return NewsResult(
-                status=NewsStatus.CLEAR,
-                nearest_event=nearest_event,
-                nearest_tier=nearest_event.tier,
-                minutes_to_nearest=nearest_minutes,
-                block_reason=None,
-                max_grade=None,
-            )
-
-        diff_minutes = (nearest_event.event_time - dt).total_seconds() / 60
-        is_before = diff_minutes > 0
-        abs_minutes = abs(diff_minutes)
-
-        blocked = False
-        if is_before and abs_minutes <= tier_cfg.block_before_minutes:
-            blocked = True
-        elif not is_before and abs_minutes <= tier_cfg.block_after_minutes:
-            blocked = True
-
-        if blocked and (tier_cfg.block_before_minutes > 0 or tier_cfg.block_after_minutes > 0):
-            direction = "before" if is_before else "after"
-            return NewsResult(
-                status=NewsStatus.BLOCKED,
-                nearest_event=nearest_event,
-                nearest_tier=tier_cfg.tier,
-                minutes_to_nearest=nearest_minutes,
-                block_reason=f"tier {tier_cfg.tier} event '{nearest_event.title}' — {int(abs_minutes)}min {direction}",
-                max_grade=None,
-            )
-
-        if tier_cfg.degrade_grade:
+        if tier_cfg is not None and tier_cfg.degrade_grade:
             return NewsResult(
                 status=NewsStatus.DEGRADED,
                 nearest_event=nearest_event,
@@ -215,7 +217,7 @@ class NewsFilter:
         return NewsResult(
             status=NewsStatus.CLEAR,
             nearest_event=nearest_event,
-            nearest_tier=tier_cfg.tier,
+            nearest_tier=(tier_cfg.tier if tier_cfg is not None else nearest_event.tier),
             minutes_to_nearest=nearest_minutes,
             block_reason=None,
             max_grade=None,

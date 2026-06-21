@@ -31,6 +31,9 @@ _ENDPOINTS = [
     ("https://fapi.binance.com", "/fapi/v1/klines"),
 ]
 _MAX_LIMIT = 1000
+# minutes per timeframe — used to compute a bar's CLOSE time (open + interval) so the
+# still-forming bar (open time in the past, close time in the future) is dropped.
+_TF_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240}
 
 
 class BinanceFetcher:
@@ -80,8 +83,13 @@ class BinanceFetcher:
                 if df.empty:
                     last_err = f"{base}: no data"
                     continue
-                # drop the in-progress (forming) bar → only CLOSED candles
-                df = df[df.index < pd.Timestamp(datetime.now(timezone.utc))]
+                # drop the in-progress (forming) bar → only CLOSED candles. The index is
+                # the kline OPEN time, so a bar is closed only once open+interval <= now.
+                # (Comparing open < now would KEEP the forming bar — its open is always
+                # in the past — which was the original no-op bug.)
+                now = pd.Timestamp(datetime.now(timezone.utc))
+                bar_td = pd.Timedelta(minutes=_TF_MINUTES.get(timeframe, 0))
+                df = df[df.index + bar_td <= now].tail(int(count))
                 return FetchResult(status=FetcherStatus.OK, data=df, source=self.source_name,
                                    latency_ms=(time.monotonic() - t0) * 1000)
             except Exception as exc:  # network/timeout → try the next endpoint

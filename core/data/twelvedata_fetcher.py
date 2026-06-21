@@ -30,6 +30,11 @@ _TF_MAP = {
     "1d": "1day",
 }
 
+# minutes per timeframe — MUST cover every _TF_MAP key, used to drop the forming bar by
+# CLOSE time (open + interval). A missing key would collapse the forming-bar filter to a
+# no-op (bug: '1d' was missing), so keep this in lockstep with _TF_MAP above.
+_TF_MINUTES = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
+
 # our symbol -> Twelve Data symbol
 _SYMBOL_MAP = {
     "XAUUSD": "XAU/USD",
@@ -168,9 +173,12 @@ class TwelveDataFetcher(DataFetcher):
                 error_message="no data returned",
             )
 
-        # Twelve Data may include the in-progress bar as the newest row — drop it.
-        now = datetime.now(timezone.utc)
-        df = df[df.index < pd.Timestamp(now)]
+        # Twelve Data's `datetime` field is the bar OPEN time, so drop the in-progress
+        # bar by CLOSE time: a bar is closed only once open+interval <= now. (open < now
+        # would KEEP the forming bar — its open is always in the past — the no-op bug.)
+        now = pd.Timestamp(datetime.now(timezone.utc))
+        bar_td = pd.Timedelta(minutes=_TF_MINUTES.get(timeframe, 0))
+        df = df[df.index + bar_td <= now]
         self.validate_dataframe(df, self.source_name)
         return FetchResult(
             status=FetcherStatus.OK, data=df.tail(count), source=self.source_name,

@@ -288,7 +288,11 @@ class SignalPipeline:
             "volume_confirmation": ctx.volume_confirmation,
             "clean_market_state": ctx.clean_market_state,
             "asia_liquidity_in_setup": ctx.asia_liquidity_in_setup,
-            "fvg_fresh": ctx.fvg_fresh,
+            # GENUINE freshness of the TRADED zone (ctx.fvg is the captured/pinned zone at
+            # emit, or the chosen zone on the non-pinned path) — state=='fresh', not the
+            # always-true alias of the mandatory fvg_freshness. So this booster + the A+
+            # freshness gate actually discriminate, and reflect the zone actually traded (#11).
+            "fvg_fresh": bool(isinstance(ctx.fvg, dict) and ctx.fvg.get("state") == "fresh"),
             "multiple_confluence": ctx.multiple_confluence,
         }
         return {k: bool(o.get(k, False)) for k in OPTIONAL_CONDITIONS}

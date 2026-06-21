@@ -46,6 +46,7 @@ def assemble_pipeline_config(config_dir: str = "config") -> Dict[str, Any]:
         "volatility": raw.get("volatility", {}),
         "market_state": raw.get("market_state", {}),
         "rr_tiers": risk.get("rr_tiers", {}),
+        "state_machine": raw.get("state_machine", {}),  # cooldown/expiry pacing (read by the live engine)
     })
 
     # Optional: swing fractal windows per timeframe, if the project defines them.

@@ -183,6 +183,38 @@ class TestAlertPath:
         assert second is None
         assert eng.alerts_sent == 1
 
+    def test_distinct_subdollar_entries_not_deduped(self, monkeypatch):
+        # Regression: the dedup content key used round(entry, 1), which collapses
+        # every sub-$0.1 coin to the 0.1 bucket — round(0.087,1)==round(0.123,1)==0.1.
+        # Two genuinely distinct setups (same grade/direction/setup_id/minute, but
+        # materially different price levels) must NOT share a dedup key.
+        sender = _CapturingSender()
+        eng = _engine(sender=sender)
+
+        class _Sig:
+            setup_id = "DOGE-ORB-1"; direction = "long"; grade = "A+"
+            entry = 0.087; sl = 0.080; tp1 = 0.110; tp2 = 0.130
+            score = 65; approved = True; timestamp = NOW; decision = None
+
+        class _Sig2:
+            setup_id = "DOGE-ORB-1"; direction = "long"; grade = "A+"
+            entry = 0.123; sl = 0.115; tp1 = 0.150; tp2 = 0.170
+            score = 65; approved = True; timestamp = NOW; decision = None
+
+        # Two DISTINCT closed bars (the engine processes each bar once; the runner emits at
+        # most one signal per bar) but the SAME wall-clock minute — so this exercises the
+        # dedup CONTENT key, which must distinguish the two sub-dollar price levels.
+        h1, h2 = {"15m": _df(60)}, {"15m": _df(61)}
+
+        monkeypatch.setattr(eng._runner, "on_bar", lambda bar, hist: _Sig())
+        assert eng.check_once(h1, NOW) is not None
+
+        # Different price level, same grade/direction/setup_id/minute → still distinct.
+        monkeypatch.setattr(eng._runner, "on_bar", lambda bar, hist: _Sig2())
+        assert eng.check_once(h2, NOW) is not None
+        assert eng.alerts_sent == 2
+        assert len(sender.sent) == 2
+
     def test_c_grade_not_alerted(self, monkeypatch):
         # B is now tradeable; C/D are not — verify C is filtered out.
         sender = _CapturingSender()

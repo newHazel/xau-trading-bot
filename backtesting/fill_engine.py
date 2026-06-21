@@ -63,6 +63,10 @@ class OpenPosition:
     sl_distance: float
     tp1_hit: bool = False
     costs_per_lot: float = 0.0
+    # accumulated realized PnL from the partial (TP1) leg, so a scaled-out trade's final
+    # TradeRecord can BLEND the banked partial with the surviving leg (set by BacktestRunner).
+    realized_gross_pnl: float = 0.0
+    realized_net_pnl: float = 0.0
 
     @property
     def is_open(self) -> bool:

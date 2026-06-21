@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.engine.sequence_runner import SequenceRunner
-from core.alerts.telegram_sender import TelegramSender, ticker_label
+from core.alerts.telegram_sender import TelegramSender, ticker_label, fmt_price
 from core.monitoring.telegram_dedup import TelegramDedup
 from core.monitoring.heartbeat import HeartbeatManager
 from core.monitoring.cycle_timing import top_of_hour_key
@@ -64,10 +64,22 @@ class LiveAlertEngine:
         # Sequential runner drives the State Machine through the setup sequence
         # across cycles (each live cycle = one new closed bar). This is what makes
         # signals actually fire — a per-bar snapshot almost never aligns all rules.
+        # Pacing (cooldown/expiry) is authored in state_machine.yaml in MINUTES; the runner
+        # counts in BARS, so convert at the execution TF. Falls back to the runner's validated
+        # defaults (8/40 bars) when absent. (Bug #9: these config keys were required but never
+        # applied — the runner silently used the hardcoded defaults.)
+        _sm = config.get("state_machine") or {}
+        _tf_min = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240}.get(live.execution_tf, 5)
+        _cd_min = _sm.get("cooldown_minutes_after_signal")
+        _ex_min = _sm.get("setup_expiry_minutes")
+        _cooldown_bars = max(1, round(_cd_min / _tf_min)) if _cd_min is not None else 8
+        _setup_expiry_bars = max(1, round(_ex_min / _tf_min)) if _ex_min is not None else 40
         self._runner = SequenceRunner(
             config, execution_tf=live.execution_tf,
             account_balance=live.account_balance,
             tradeable_grades=tuple(live.tradeable_grades),
+            cooldown_bars=_cooldown_bars,
+            setup_expiry_bars=_setup_expiry_bars,
         )
         self._dedup = TelegramDedup({"max_dedup_history": 500})
         # forward paper-trade measurement (no effect on signals) — records each alert
@@ -88,6 +100,7 @@ class LiveAlertEngine:
         self._htf_cache: Dict[str, Any] = {}
         self._htf_last_fetch: Optional[datetime] = None
         self._fetch_count = 0
+        self._last_bar_ts = None  # newest CLOSED bar already processed (process each once)
 
     @property
     def alerts_sent(self) -> int:
@@ -118,6 +131,7 @@ class LiveAlertEngine:
             or (now - self._htf_last_fetch).total_seconds() >= self._live.htf_refresh_minutes * 60
         )
 
+        htf_ok = True
         for tf in self._live.timeframes:
             if tf in htf:
                 if htf_due:
@@ -126,12 +140,18 @@ class LiveAlertEngine:
                         self._htf_cache[tf] = data
                 if tf in self._htf_cache:
                     history[tf] = self._htf_cache[tf]
+                else:
+                    htf_ok = False  # this HTF still has no data after the attempt
             else:
                 data = self._do_fetch(tf)
                 if data is not None:
                     history[tf] = data
 
-        if htf_due:
+        # Advance the refresh clock ONLY when every HTF actually has data. Otherwise a
+        # transient fetch failure leaves the HTF cache empty (→ no htf_bias → the sequence
+        # never advances → ZERO alerts) yet the clock pretends we just refreshed, muting
+        # the bot for a whole refresh window. Not advancing → retry next cycle (self-heal).
+        if htf_due and htf_ok:
             self._htf_last_fetch = now
         return history
 
@@ -144,12 +164,20 @@ class LiveAlertEngine:
             return None
 
         last_ts = df.index[-1]
+        # Process each distinct CLOSED bar once. If the poll interval is shorter than the
+        # execution TF, the same newest bar repeats across cycles; re-running on_bar would
+        # double-advance the bar-counted cooldown/expiry. Skip if the bar is unchanged.
+        if last_ts == self._last_bar_ts:
+            return None
         bar = {
             "timestamp": last_ts.to_pydatetime() if hasattr(last_ts, "to_pydatetime") else last_ts,
             "bar_index": len(df) - 1,
             "symbol": self._live.symbol,
         }
         sig = self._runner.on_bar(bar, history)
+        # Mark processed only AFTER on_bar ran, so a transient pipeline exception doesn't
+        # permanently skip this bar — it gets retried on the next cycle instead.
+        self._last_bar_ts = last_ts
         nm = getattr(self._runner, "last_near_miss", None)
         if nm is not None:
             try:  # telemetry only — must never break the alert path
@@ -160,7 +188,11 @@ class LiveAlertEngine:
             return None
 
         # Dedup on content + setup_id + minute → avoid repeat spam on the same bar.
-        content = f"{sig.grade}|{sig.direction}|{round(sig.entry, 1)}"
+        # Use adaptive price precision (fmt_price) for the entry component: a fixed
+        # round(...,1) collapses every sub-$0.1 coin (DOGE ~0.087, SAND…) to the same
+        # 0.1 bucket, so distinct setups at different levels would share one dedup key
+        # and the second alert would be silently suppressed.
+        content = f"{sig.grade}|{sig.direction}|{fmt_price(sig.entry)}"
         if not self._dedup.should_send(content, sig.setup_id, now):
             return None
 

@@ -1,5 +1,8 @@
-cooldown_minutes_after_signal: 60
-setup_expiry_minutes: 90
+# These are now ACTUALLY applied by the live engine (converted minutes→bars at the exec TF).
+# Values set to reproduce the validated 8-bar cooldown / 40-bar expiry at the 5m exec TF
+# (40min/5 = 8 bars, 200min/5 = 40 bars). Re-tune freely — the change now takes effect.
+cooldown_minutes_after_signal: 40
+setup_expiry_minutes: 200
 setup_expiry_starts_from: "fvg_creation"  # fvg_creation / sweep / zone_arrival
 max_active_setups_per_symbol: 1
 prevent_duplicate_zone_signals: true

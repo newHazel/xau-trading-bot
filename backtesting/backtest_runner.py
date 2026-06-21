@@ -74,6 +74,7 @@ class BacktestConfig:
     costs_inclusive: bool = True
     default_spread: float = 0.25
     default_slippage: float = 0.10
+    entry_trigger_expiry_bars: int = 12  # a limit entry never touched within N bars is dropped (no trade)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "BacktestConfig":
@@ -243,7 +244,9 @@ class BacktestRunner:
         tp2 = signal.get("tp2", tp1)
         lot_size = signal.get("lot_size", 0.01)
         sl_distance = abs(entry - sl)
-        costs = (self._config.default_spread + self._config.default_slippage) if self._config.costs_inclusive else 0
+        # Spread ONLY: slippage is already baked into the fill PRICE by the fill engine, so
+        # adding it to costs here too would double-count it (bug #6: net_pnl double-slippage).
+        costs = self._config.default_spread if self._config.costs_inclusive else 0
 
         self._open_position = OpenPosition(
             direction=direction,
@@ -261,13 +264,25 @@ class BacktestRunner:
 
     def _record_fill(self, fill: FillResult, bar: ReplayBar) -> None:
         pos = self._open_position
+        # TP1 is a PARTIAL close: bank its realized PnL on the position and record NOTHING
+        # yet — the final TradeRecord blends it with the surviving leg. (Bug #3: dropping the
+        # TP1 leg booked a TP1-then-SL scale-out as a full -1R loss.)
         if fill.fill_type == FillType.TP1_HIT:
+            pos.realized_gross_pnl += fill.gross_pnl
+            pos.realized_net_pnl += fill.net_pnl
             return
 
         day_key = bar.timestamp.strftime("%Y-%m-%d") if hasattr(bar.timestamp, "strftime") else str(bar.timestamp)
         if fill.fill_type == FillType.SL_HIT:
             self._daily_losses[day_key] = self._daily_losses.get(day_key, 0) + 1
 
+        # Blend any banked TP1 partial with this terminal leg. R is the lot-weighted NET pnl
+        # (spread+slippage included, single-counted after the #6 cost fix) over the FULL
+        # position's risk — honest of all costs (#6) and correctly blended across legs (#3).
+        total_gross = pos.realized_gross_pnl + fill.gross_pnl
+        total_net = pos.realized_net_pnl + fill.net_pnl
+        denom = pos.lot_size * pos.sl_distance
+        r_mult = (total_net / denom) if denom else 0.0
         self._trades.append(TradeRecord(
             setup_id=pos.setup_id,
             direction=pos.direction,
@@ -277,10 +292,10 @@ class BacktestRunner:
             exit_time=bar.timestamp,
             exit_type=fill.fill_type.value,
             lot_size=pos.lot_size,
-            gross_pnl=fill.gross_pnl,
-            net_pnl=fill.net_pnl,
-            costs=fill.costs,
-            r_multiple=fill.r_multiple,
+            gross_pnl=total_gross,
+            net_pnl=total_net,
+            costs=total_gross - total_net,
+            r_multiple=r_mult,
             sl_price=pos.sl_price,
             tp1_price=pos.tp1_price,
             tp2_price=pos.tp2_price,
@@ -292,6 +307,10 @@ class BacktestRunner:
         pos = self._open_position
         if not pos or not pos.is_open:
             return
+        # Keep any banked TP1 partial (bug #7: a TP1-then-open-runner force-close booked 0R,
+        # erasing the realized gain). The surviving (unrealized) runner half is left flat.
+        denom = pos.lot_size * pos.sl_distance
+        r_mult = (pos.realized_net_pnl / denom) if denom else 0.0
         self._trades.append(TradeRecord(
             setup_id=pos.setup_id,
             direction=pos.direction,
@@ -301,10 +320,10 @@ class BacktestRunner:
             exit_time=None,
             exit_type="forced_close",
             lot_size=pos.lot_size,
-            gross_pnl=0,
-            net_pnl=0,
-            costs=0,
-            r_multiple=0,
+            gross_pnl=pos.realized_gross_pnl,
+            net_pnl=pos.realized_net_pnl,
+            costs=pos.realized_gross_pnl - pos.realized_net_pnl,
+            r_multiple=r_mult,
             sl_price=pos.sl_price,
             tp1_price=pos.tp1_price,
             tp2_price=pos.tp2_price,
