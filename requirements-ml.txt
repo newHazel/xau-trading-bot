@@ -1,0 +1,18 @@
+# Phase 12 — ML confidence layer dependencies.
+#
+# Kept SEPARATE from requirements.txt on purpose: the live bot (Railway Docker image)
+# does NOT need these, and lightgbm is a heavy wheel — we don't want it bloating the
+# 24/7 alert service. Install this ONLY in the training/dataset environment (your M1
+# for light work, or a RunPod CPU pod for the heavy dataset build / training):
+#
+#     pip install -r requirements.txt -r requirements-ml.txt
+#
+# Phase 12.1 (feature_extractor) and 12.2 (labeler + build_ml_dataset) need ONLY
+# pandas/numpy (already in requirements.txt) — nothing here is required to BUILD the
+# dataset. These are for 12.3+ (training the model) and are listed now so the env is
+# ready. Gradient boosting on tabular features is CPU-only — no GPU/CUDA package here.
+
+scikit-learn>=1.3.0      # metrics, calibration, train/test utilities
+lightgbm>=4.0.0          # the gradient-boosting model (CPU; primary choice)
+pyarrow>=14.0.0          # optional: parquet I/O if datasets outgrow CSV
+joblib>=1.3.0            # model persistence (.pkl) for the inference gate

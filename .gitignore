@@ -32,6 +32,8 @@ ENV/
 # Data (raw / large files)
 data/raw/*.csv
 data/processed/*.csv
+# generated ML datasets + checkpoints (Phase 12, e.g. data/processed/ml/*.csv + *.json)
+data/processed/**
 data/database/*.sqlite
 
 # Reports (generated)
