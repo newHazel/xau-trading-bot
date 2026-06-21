@@ -73,7 +73,10 @@ class LiveAlertEngine:
         # forward paper-trade measurement (no effect on signals) — records each alert
         # and resolves it WIN/LOSS so we accumulate a real forward win%/PF/R record.
         # Labelled with the ticker so multi-symbol fleets show which coin resolved.
-        self._tracker = OutcomeTracker(label=ticker_label(live.symbol))
+        self._tracker = OutcomeTracker(
+            label=ticker_label(live.symbol),
+            entry_expiry_bars=int(config.get("entry_trigger_expiry_bars", 12)),
+        )
         # near-miss telemetry: completed setups the bot REJECTED at a gate (+ why),
         # labelled with the ticker so multi-symbol fleets show which coin nearly fired.
         self._near_miss = NearMissTracker(label=ticker_label(live.symbol))
@@ -171,7 +174,8 @@ class LiveAlertEngine:
                 pass
         self._hb.update_signal(sig.setup_id, now)
         try:  # forward measurement only — must never break the alert path
-            self._tracker.record(sig, now)
+            # pass the signal bar's timestamp so the tracker resolves only on LATER bars
+            self._tracker.record(sig, now, last_bar_ts=last_ts)
         except Exception:
             pass
         return sig

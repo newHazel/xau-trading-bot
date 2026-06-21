@@ -28,6 +28,10 @@ rr_tiers:
 tp1_r: 2.0
 tp2_r: 3.5
 require_liquidity_target_for_tp2: true
+# Forward OutcomeTracker (+ backtest entry-trigger): a limit entry that price never
+# trades through within this many bars is EXPIRED (no trade), not a loss. Same value the
+# backtest uses, so the live forward record matches backtest/label methodology.
+entry_trigger_expiry_bars: 12
 atr_period: 14
 atr_sl_multiplier: 1.5
 swing_buffer_atr_ratio: 0.20
