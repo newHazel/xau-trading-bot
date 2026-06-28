@@ -2,7 +2,9 @@
 
 import pytest
 from datetime import datetime, timezone
-from core.engine.signal_pipeline import SignalPipeline, PipelineContext, PipelineSignal
+from core.engine.signal_pipeline import (
+    SignalPipeline, PipelineContext, PipelineSignal, zone_allows_direction,
+)
 from core.engine.rulebook_engine import RulebookEngine
 
 CONFIG = {
@@ -127,6 +129,61 @@ class TestMandatoryGate:
         sig = pipe.process_bar(_bar())
         assert sig is not None  # signal still built (for logging/rejection)
         assert sig.approved is False
+
+
+class TestZoneAllowsDirection:
+    """Unit truth-table for the SMC zone gate: long only in discount, short only in
+    premium. Locks the root-cause fix (the old gate accepted ANY zone)."""
+
+    def test_long_only_in_discount(self):
+        assert zone_allows_direction("discount", "long") is True
+        assert zone_allows_direction("premium", "long") is False
+        assert zone_allows_direction("equilibrium", "long") is False
+        assert zone_allows_direction("undefined", "long") is False
+        assert zone_allows_direction(None, "long") is False
+
+    def test_short_only_in_premium(self):
+        assert zone_allows_direction("premium", "short") is True
+        assert zone_allows_direction("discount", "short") is False
+        assert zone_allows_direction("equilibrium", "short") is False
+        assert zone_allows_direction(None, "short") is False
+
+    def test_neutral_or_none_direction_never_allowed(self):
+        assert zone_allows_direction("discount", "neutral") is False
+        assert zone_allows_direction("premium", None) is False
+
+
+class TestZoneDirectionGateInPipeline:
+    """Root-cause regression lock: a LONG in PREMIUM (or a SHORT in DISCOUNT) is on the
+    wrong side of equilibrium and must NOT be approved. The pre-fix gate accepted any
+    zone, letting these wrong-side setups through (the 'enters when it should NOT' bug)."""
+
+    def _pipe(self, engine, direction, zone):
+        def structure(ctx, bar, history):
+            ctx.direction = direction
+            ctx.htf_bias = direction
+            ctx.structure_15m = direction
+            ctx.price_zone = zone
+        return SignalPipeline(
+            engine, structure_hook=structure, smc_hook=_full_smc,
+            filter_hook=_full_filters, risk_hook=_full_risk,
+        )
+
+    def test_long_in_premium_rejected(self, engine):
+        sig = self._pipe(engine, "long", "premium").process_bar(_bar())
+        assert sig is not None and sig.approved is False
+
+    def test_short_in_discount_rejected(self, engine):
+        sig = self._pipe(engine, "short", "discount").process_bar(_bar())
+        assert sig is not None and sig.approved is False
+
+    def test_long_in_discount_approved(self, engine):
+        sig = self._pipe(engine, "long", "discount").process_bar(_bar())
+        assert sig is not None and sig.approved is True
+
+    def test_short_in_premium_approved(self, engine):
+        sig = self._pipe(engine, "short", "premium").process_bar(_bar())
+        assert sig is not None and sig.approved is True
 
 
 class TestIndicatorToggle:

@@ -66,6 +66,14 @@ class EMACalculator:
         self._prev_fast_above_slow: Optional[bool] = None
         self._last_crossover: Optional[CrossoverEvent] = None
         self._readings: List[EMAReading] = []
+        # SMA-seeded warmup: average the first `period` closes before switching to the
+        # EMA recursion, instead of seeding off the single first close. A single-close
+        # seed leaves a residual seed weight in a long EMA — EMA200 over a ~300-bar
+        # window stays ≈5% contaminated by the window's first price, making the bias /
+        # golden-death cross flicker. Seeding with the SMA removes that.
+        self._count = 0
+        self._sum_fast = 0.0
+        self._sum_slow = 0.0
 
     def reset(self) -> None:
         self._ema_fast = None
@@ -73,6 +81,9 @@ class EMACalculator:
         self._prev_fast_above_slow = None
         self._last_crossover = None
         self._readings = []
+        self._count = 0
+        self._sum_fast = 0.0
+        self._sum_slow = 0.0
 
     def update(self, candle: Dict[str, Any]) -> EMAReading:
         ts = candle["timestamp"]
@@ -81,11 +92,18 @@ class EMACalculator:
 
         close = candle["close"]
 
-        if self._ema_fast is None:
-            self._ema_fast = close
-            self._ema_slow = close
+        self._count += 1
+        # Fast EMA: SMA of the first `fast_period` closes (warmup), then EMA recursion.
+        if self._count <= self.fast_period:
+            self._sum_fast += close
+            self._ema_fast = self._sum_fast / self._count
         else:
             self._ema_fast = (close - self._ema_fast) * self._k_fast + self._ema_fast
+        # Slow EMA: same SMA-seeded warmup over `slow_period` closes.
+        if self._count <= self.slow_period:
+            self._sum_slow += close
+            self._ema_slow = self._sum_slow / self._count
+        else:
             self._ema_slow = (close - self._ema_slow) * self._k_slow + self._ema_slow
 
         bias = self._compute_bias(close)

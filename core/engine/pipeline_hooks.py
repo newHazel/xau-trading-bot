@@ -66,7 +66,11 @@ def compute_atr(df: pd.DataFrame, period: int = 14) -> float:
         (high - prev_close).abs(),
         (low - prev_close).abs(),
     ], axis=1).max(axis=1)
-    return float(tr.tail(period).mean())
+    # Wilder ATR (RMA of TR) — same smoothing compute_rsi already uses, not a plain
+    # SMA of the last `period` true ranges. The old tr.tail(period).mean() was an SMA
+    # despite the "Wilder" docstring, inconsistent with the RSI calc.
+    atr = tr.ewm(alpha=1.0 / period, adjust=False).mean()
+    return float(atr.iloc[-1])
 
 
 def atr_series(df: pd.DataFrame, period: int = 14, tail: int = 50) -> list:
@@ -86,7 +90,9 @@ def atr_series(df: pd.DataFrame, period: int = 14, tail: int = 50) -> list:
         (high - prev_close).abs(),
         (low - prev_close).abs(),
     ], axis=1).max(axis=1)
-    roll = tr.rolling(period).mean().dropna()
+    # Wilder ATR series (RMA of TR), consistent with compute_atr above — not a plain
+    # rolling SMA. The VolatilityFilter compares the latest reading to the median.
+    roll = tr.ewm(alpha=1.0 / period, adjust=False).mean().dropna()
     return [float(x) for x in roll.tail(tail)]
 
 
@@ -339,7 +345,13 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
         chosen_fvg = select_fvg(candidates, df, config)
         ctx.fvg = chosen_fvg
         ctx.fvg_valid = chosen_fvg is not None
-        ctx.fvg_fresh = chosen_fvg is not None  # mandatory fvg_freshness: a tradeable zone exists
+        # mandatory fvg_freshness: the chosen zone is in the tradeable freshness set
+        # (fresh/tapped/partial). Behaviour-equivalent to `chosen_fvg is not None` today
+        # (the candidate filter already excludes deep/mitigated), but reads the zone STATE
+        # explicitly instead of being a blind alias of fvg_valid — so it correctly rejects
+        # if an over-mitigated zone ever reaches here. (Genuine 'fresh' = optional booster.)
+        ctx.fvg_fresh = bool(isinstance(chosen_fvg, dict)
+                             and chosen_fvg.get("state") in tradeable_states)
         # (The optional fvg_fresh BOOSTER is derived separately from the TRADED zone's state
         #  in SignalPipeline._build_optional — genuine 'fresh' vs 'tapped'/'partial' — bug #11.)
         if chosen_fvg is not None:
@@ -371,12 +383,15 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
         # --- displacement strength ---
         disp_df = displacement.detect(df)
         if hasattr(displacement, "get_last_displacement"):
-            last_disp = displacement.get_last_displacement(disp_df)
+            # Pass direction=smc_dir: get_last_displacement defaults to "bull", so for a
+            # SHORT setup the old call returned bull displacements and strong_displacement
+            # was always False. Recency reads the real key 'confirm_pos' — the old code read
+            # 'pos' (absent) so `"pos" in last_disp` was False → in_window always True.
+            last_disp = displacement.get_last_displacement(disp_df, direction=smc_dir)
             if isinstance(last_disp, dict):
-                dtype = last_disp.get("type") or last_disp.get("displacement_type")
-                in_window = (last_pos - int(last_disp.get("pos", last_pos))) <= recency \
-                    if "pos" in last_disp else True
-                ctx.strong_displacement = (dtype == smc_dir) and in_window
+                pos = int(last_disp.get("confirm_pos", last_pos))
+                in_window = (last_pos - pos) <= recency
+                ctx.strong_displacement = (last_disp.get("type") == smc_dir) and in_window
 
         # --- volume confirmation: a volume spike on the latest candle (optional booster) ---
         vol = df["volume"].astype(float)
@@ -609,7 +624,13 @@ def make_risk_hook(config: Optional[Dict[str, Any]] = None,
         ctx.net_rr = rr.net_rr
         ctx.rr_minimum_ok = rr.valid
         ctx.extra["gross_rr"] = rr.gross_rr  # keep gross too, for display transparency
-        ctx.lot_size = getattr(size, "lot_size", 0.01) if size and getattr(size, "valid", True) else 0.01
+        size_ok = bool(size and getattr(size, "valid", False))
+        ctx.lot_size = getattr(size, "lot_size", 0.01) if size_ok else 0.01
+        # Honor the sizer's rejection: a valid=False result means the risk could NOT be
+        # validated against risk_per_trade/max (SL too small, account can't afford 0.01).
+        # The emit paths suppress the signal on sizing_valid=False instead of firing a
+        # forced 0.01 lot whose risk was never checked.
+        ctx.extra["sizing_valid"] = size_ok
         ctx.liquidity_target_clear = liq_price is not None
         # multiple confluence booster: 2+ of OB / displacement / DXY / fresh FVG
         ctx.multiple_confluence = sum([

@@ -26,7 +26,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.engine.rulebook_engine import RulebookEngine
-from core.engine.signal_pipeline import PipelineContext, PipelineSignal, SignalPipeline
+from core.engine.signal_pipeline import (
+    PipelineContext, PipelineSignal, SignalPipeline, zone_allows_direction,
+)
 from core.engine.pipeline_hooks import build_default_hooks
 from core.engine.state_machine import StateMachine, State
 
@@ -50,7 +52,8 @@ def _advance_condition(ctx: PipelineContext, key: str) -> bool:
     if key == "15m_aligned":
         return ctx.structure_15m == ctx.direction
     if key == "price_zone":
-        return ctx.price_zone in ("premium", "discount")
+        # SMC: long only in discount, short only in premium — NOT any zone.
+        return zone_allows_direction(ctx.price_zone, ctx.direction)
     if key == "sweep":
         return ctx.sweep is not None and ctx.sweep_confirmed
     if key == "fvg":
@@ -282,6 +285,13 @@ class SequenceRunner:
             self._reset(now, "risk could not size the setup")
             return None
 
+        # Sizing must have validated the risk against the configured limits. A
+        # valid=False result (SL too small / account can't afford the min lot) was
+        # previously coerced to a 0.01 lot and fired anyway — suppress instead.
+        if not ctx.extra.get("sizing_valid", True):
+            self._reset(now, "position size invalid (risk > limit / too small)")
+            return None
+
         # Price-sanity gate: if the current (closed) price has ALREADY broken past the
         # SL, the captured FVG/zone was blown through — this is a dead-on-arrival loss
         # (the entry is stale/unreachable). Invalidate instead of firing.
@@ -301,8 +311,13 @@ class SequenceRunner:
                     return None
 
         # sequence conditions are TRUE (we tracked them); gates checked now.
+        # EXCEPTION: price_zone is re-validated against the LIVE zone at emit. The FSM
+        # is forward-only and the zone is recomputed every bar, so a setup locked in the
+        # right zone can drift to the wrong half of the range by the time it fires.
+        # Re-asserting here (vs the old hardcoded True) blocks firing from the wrong side.
         mandatory = {
-            "htf_bias": True, "15m_aligned": True, "price_zone": True,
+            "htf_bias": True, "15m_aligned": True,
+            "price_zone": zone_allows_direction(ctx.price_zone, ctx.direction),
             "sweep": True, "sweep_confirmation": True,
             "fvg_valid": True, "fvg_freshness": True,
             "retrace_to_zone": True, "micro_choch": True, "confirmation_candle": True,

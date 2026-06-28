@@ -49,6 +49,25 @@ from core.engine.rulebook_engine import (
 StageHook = Callable[["PipelineContext", Any, Any], None]
 
 
+def zone_allows_direction(zone: Optional[str], direction: Optional[str]) -> bool:
+    """SMC premium/discount gate, matched to the trade direction.
+
+    A LONG may enter only in DISCOUNT (lower half of the dealing range — buy a dip);
+    a SHORT only in PREMIUM (upper half — sell a rally). See
+    core/structure/premium_discount.py: premium = sell bias, discount = buy bias.
+
+    The original gate (`zone in ("premium","discount")`) was True for BOTH zones and
+    never compared to the direction, so a long could enter in premium and a short in
+    discount — wrong-side-of-equilibrium entries whose proximal-edge limit never fills
+    on a one-directional move (the live 'enters when it should NOT / never fills' bug).
+    """
+    if direction == "long":
+        return zone == "discount"
+    if direction == "short":
+        return zone == "premium"
+    return False
+
+
 @dataclass
 class PipelineContext:
     """Mutable scratchpad that accumulates each stage's output for one bar.
@@ -220,6 +239,13 @@ class SignalPipeline:
             # Risk stage not wired / no setup — nothing to trade this bar.
             return None
 
+        # Position sizing must have validated the risk against the configured limits.
+        # A valid=False sizing result (SL too small / account can't afford the min lot)
+        # was previously coerced to a 0.01 lot and the trade fired anyway, risking an
+        # un-validated amount. Suppress instead.
+        if not ctx.extra.get("sizing_valid", True):
+            return None
+
         decision = self._rulebook.evaluate(
             direction=ctx.direction,
             mandatory=mandatory,
@@ -260,7 +286,7 @@ class SignalPipeline:
         m = {
             "htf_bias": ctx.htf_bias in ("long", "short"),
             "15m_aligned": ctx.structure_15m == ctx.direction,
-            "price_zone": ctx.price_zone in ("premium", "discount"),
+            "price_zone": zone_allows_direction(ctx.price_zone, ctx.direction),
             "sweep": ctx.sweep is not None,
             "sweep_confirmation": ctx.sweep_confirmed,
             "fvg_valid": ctx.fvg_valid,

@@ -96,7 +96,12 @@ class LiquidityTargetFinder:
         has_before_2r = any(t.r_multiple <= self._tp1_r for t in targets)
         has_2r_5r = any(self._tp1_r < t.r_multiple <= 5.0 for t in targets)
 
-        tp2_candidates = [t for t in targets if t.r_multiple >= self._tp1_r]
+        # Strictly BEYOND tp1 (not >=): TakeProfitCalculator only adopts a liquidity TP2
+        # when it is past tp1 (LONG price > tp1 / SHORT < tp1). A target sitting exactly at
+        # tp1_r used to pass this >= filter and set liquidity_target_clear=True while
+        # TakeProfit silently fell back to the 3.5R generic level — an inconsistent booster
+        # flag at the 2R boundary. Match the > threshold so the two agree.
+        tp2_candidates = [t for t in targets if t.r_multiple > self._tp1_r]
         tp2_target = tp2_candidates[0] if tp2_candidates else None
 
         valid = True
