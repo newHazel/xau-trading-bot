@@ -41,6 +41,7 @@ from core.engine.sequence_runner import SequenceRunner
 from core.engine.pipeline_config import assemble_pipeline_config
 from backtesting.backtest_runner import BacktestRunner, BacktestConfig
 from backtesting.metrics import compute_metrics
+from backtesting.bootstrap import bootstrap_ci, bootstrap_diff, holm_threshold
 
 _TFS = ["4h", "1h", "15m", "5m", "1m"]
 DB_DEFAULT = "data/database/trading_bot.sqlite"
@@ -96,6 +97,21 @@ VARIANTS = {
                    "costs": {"cost_model": "percent", "spread_pct": 0.0002, "slippage_pct": 0.0002},
                    "spread": {"cost_model": "percent", "spread_pct": 0.0002}},
 }
+
+# --- CRYPTO ABLATION LEVERS (institutional study) ---------------------------------
+# Each lever = the crypto_pct BASELINE + exactly ONE change, so the ablation attributes
+# the effect cleanly (NOT built on the gold 'freshness' base, which would confound the
+# kill-zone). Compare each to crypto_pct, validated OOS with bootstrap CIs.
+_CRYPTO_PCT = VARIANTS["crypto_pct"]
+VARIANTS.update({
+    # momentum gate (WIRED): don't enter against momentum (falling-knife) — long needs
+    # RSI>=45 / short<=55. Hypothesis: higher win% / fewer immediate-reversal entries.
+    "crypto_mom":   {**_CRYPTO_PCT, "momentum_gate": True, "rsi_long_min": 45.0, "rsi_short_max": 55.0},
+    # sweep-early: arm the sequence on the PROVISIONAL wick (with a breakout guard)
+    # instead of waiting for the confirmed close-back — catch the move before it's too
+    # late / already reversed (the user's core complaint). Hypothesis: more/earlier fills.
+    "crypto_sweep": {**_CRYPTO_PCT, "sweep_early": True},
+})
 
 
 def _load(db, sym, tf):
@@ -173,13 +189,17 @@ def _chunks(range_start, n, chunk_bars):
         cs += chunk_bars
 
 
-def _score(signals, exec_df, range_start, exec_tf, overrides=None):
+def _run_trades(signals, exec_df, range_start, exec_tf, overrides=None):
+    """Fill/backtest `signals` (rebased to range_start) → list of trade dicts.
+    A signal whose limit entry is never bracketed within the trigger window is DROPPED
+    (no trade), so len(trades) < len(signals) measures the fill rate (the 'entered too
+    late / price ran away' rate the user cares about)."""
     sigs = sorted(signals, key=lambda s: s["gpos"])
     fe = [{"setup_id": s["setup_id"], "direction": s["direction"], "entry": s["entry"],
            "sl": s["sl"], "tp1": s["tp1"], "tp2": s["tp2"], "lot_size": 0.1,
            "bar_index": s["gpos"] - range_start, "grade": s["grade"]} for s in sigs]
     if not fe:
-        return None
+        return []
     exec_slice = exec_df.iloc[range_start:].copy()
     # The fill engine's costs MUST match the variant's cost model. BacktestRunner only
     # knows absolute spread/slippage, so for a "percent" variant we scale them to the
@@ -196,7 +216,189 @@ def _score(signals, exec_df, range_start, exec_tf, overrides=None):
         initial_balance=10000.0, conservative_fills=True, costs_inclusive=True,
         default_spread=spread, default_slippage=slippage,
         max_daily_trades=999, max_daily_losses=999, base_timeframe=exec_tf))
-    return compute_metrics([t.to_dict() for t in bt.run(exec_slice, signals=fe).trades])
+    return [t.to_dict() for t in bt.run(exec_slice, signals=fe).trades]
+
+
+def _score(signals, exec_df, range_start, exec_tf, overrides=None):
+    """Metrics for `signals` (None only when there are NO signals at all; if signals
+    exist but none fill, returns a real MetricsResult with total_trades=0)."""
+    if not signals:
+        return None
+    trades = _run_trades(signals, exec_df, range_start, exec_tf, overrides)
+    total_bars = max(0, len(exec_df) - range_start)
+    return compute_metrics(trades, total_bars=total_bars)
+
+
+def _evaluate(signals, exec_df, range_start, exec_tf, overrides=None):
+    """(metrics, r_values, n_signals) in one backtest pass — for the institutional
+    report (metrics + bootstrap on the same trade list, plus the fill rate)."""
+    n_sig = len(signals)
+    if n_sig == 0:
+        return None, [], 0
+    trades = _run_trades(signals, exec_df, range_start, exec_tf, overrides)
+    total_bars = max(0, len(exec_df) - range_start)
+    metrics = compute_metrics(trades, total_bars=total_bars)
+    r_values = [t.get("r_multiple", 0) for t in trades]
+    return metrics, r_values, n_sig
+
+
+def _pf(x):
+    return "inf" if x == float("inf") else f"{x:.2f}"
+
+
+def _reach_rate(signals, exec_df, range_start, expiry=12):
+    """CLEAN 'entered vs ran away' rate: of N signals, the fraction whose limit price was
+    bracketed by SOME bar within `expiry` bars of the signal — computed directly from the
+    bars, independent of the backtest's one-position-at-a-time occupancy.
+
+    This is the honest answer to the user's complaint ('entered too late / price already
+    reversed'). It differs from the runner's fill rate (filled/signals), which ALSO drops
+    signals that arrived while another trade was open (an occupancy skip, NOT a runaway).
+    Returns (reach_fraction, reached, n)."""
+    if not signals:
+        return 0.0, 0, 0
+    lo = exec_df["low"].to_numpy(dtype=float)
+    hi = exec_df["high"].to_numpy(dtype=float)
+    nbars = len(exec_df)
+    reached = 0
+    for s in signals:
+        g = int(s["gpos"]); e = float(s["entry"])
+        end = min(nbars, g + expiry + 1)
+        if g < nbars and any(lo[b] <= e <= hi[b] for b in range(g, end)):
+            reached += 1
+    return reached / len(signals), reached, len(signals)
+
+
+def _fmt_row(label, n_sig, m, min_trades, reach_pct):
+    """One institutional metrics row. n_sig = signals GENERATED; m.total_trades = FILLED
+    (occupancy-limited); reach_pct = clean entered-vs-ran-away rate."""
+    if m is None or n_sig == 0:
+        return f"  {label:<14}{n_sig:>8}{'  -- no signals':>30}"
+    filled = m.total_trades
+    flag = "  !INSUFF" if filled < min_trades else ""
+    return (f"  {label:<14}{n_sig:>8}{filled:>8}{reach_pct*100:>6.0f}%{m.win_rate*100:>7.1f}"
+            f"{_pf(m.profit_factor):>7}{m.expectancy:>8.3f}{m.total_r:>8.1f}{m.max_drawdown_r:>7.1f}"
+            f"{_pf(m.sortino):>7}{_pf(m.payoff_ratio):>7}{m.longest_loss_streak:>6}{flag}")
+
+
+def _report(by, exec_df, range_start, n, exec_tf, variants, span, months, args):
+    sym = args.symbol
+    print(f"\n{'='*104}\n  BACKTEST RESULT — {sym} exec_tf={exec_tf}  (corrected engine: price_zone gate + Wilder ATR + sizing)")
+    print(f"  period {span.index[0]:%Y-%m-%d}->{span.index[-1]:%Y-%m-%d}  ({months:.1f} months, {len(span)} bars)")
+    print(f"  reach% = of N signals, how many price actually RETURNED to (entered vs ran away) — the")
+    print(f"           clean entry-timing measure. 'filled' = trades actually taken (occupancy-limited);")
+    print(f"           R-stats below are computed on those. !INSUFF = < {args.min_trades} fills = insufficient evidence.")
+    print(f"{'='*104}")
+    print(f"  {'variant':<14}{'signals':>8}{'filled':>8}{'reach':>7}{'win%':>7}"
+          f"{'PF':>7}{'expR':>8}{'totR':>8}{'maxDD':>7}{'Sortino':>7}{'payoff':>7}{'Lstrk':>6}")
+    full = {}
+    for v in variants:
+        m, rv, nsig = _evaluate(by[v], exec_df, range_start, exec_tf, VARIANTS[v])
+        full[v] = (m, rv, nsig)
+        reach, _rc, _rn = _reach_rate(by[v], exec_df, range_start)
+        print(_fmt_row(v, nsig, m, args.min_trades, reach))
+
+    # per-variant detail: long/short + exit-type + optional bootstrap CIs
+    for v in variants:
+        m, rv, nsig = full[v]
+        if m is None or m.total_trades == 0:
+            continue
+        bd = m.breakdowns.get("by_direction", {})
+        ds = " | ".join(f"{d}:{s['count']}@{s['win_rate']*100:.0f}%/{s['total_r']:+.1f}R" for d, s in bd.items())
+        ex = " | ".join(f"{et}:{s['count']}/{s['total_r']:+.1f}R" for et, s in m.exit_types.items())
+        print(f"\n  [{v}] dir : {ds}")
+        print(f"  [{v}] exit: {ex}")
+        if args.bootstrap:
+            ci = bootstrap_ci(rv)
+            c = ci["ci"]
+            print(f"  [{v}] 95%CI PF[{_pf(c['profit_factor'][0])}..{_pf(c['profit_factor'][1])}] "
+                  f"expR[{c['expectancy'][0]:+.2f}..{c['expectancy'][1]:+.2f}] "
+                  f"totR[{c['total_r'][0]:+.1f}..{c['total_r'][1]:+.1f}]  P(no edge)={ci['p_no_edge']*100:.0f}%")
+
+    # OUT-OF-SAMPLE split (pre-committed chronological holdout)
+    oos_data = {}
+    if args.oos_ratio and args.oos_ratio > 0:
+        cut = range_start + int((1 - args.oos_ratio) * (n - range_start))
+        cut_ts = exec_df.index[cut]
+        print(f"\n{'-'*104}\n  OUT-OF-SAMPLE  ({int((1-args.oos_ratio)*100)}/{int(args.oos_ratio*100)} chronological split, OOS starts {cut_ts:%Y-%m-%d %H:%M})")
+        print(f"  {'variant':<14}{'IS_sig':>7}{'IS_fil':>7}{'IS_totR':>9}{'IS_PF':>7}{'   ':>3}"
+              f"{'OOS_sig':>8}{'OOS_fil':>8}{'OOS_totR':>9}{'OOS_PF':>8}{'OOS_exp':>9}")
+        for v in variants:
+            is_sigs = [s for s in by[v] if s["gpos"] < cut]
+            oos_sigs = [s for s in by[v] if s["gpos"] >= cut]
+            mi, ri, ni = _evaluate(is_sigs, exec_df.iloc[:cut], range_start, exec_tf, VARIANTS[v])
+            mo, ro, no = _evaluate(oos_sigs, exec_df, cut, exec_tf, VARIANTS[v])
+            oos_data[v] = (mi, ri, ni, mo, ro, no)
+            isf = mi.total_trades if mi else 0
+            ist = f"{mi.total_r:+.1f}" if mi else "-"
+            isp = _pf(mi.profit_factor) if mi else "-"
+            if mo and no:
+                flg = " !" if mo.total_trades < args.min_oos_trades else ""
+                print(f"  {v:<14}{ni:>7}{isf:>7}{ist:>9}{isp:>7}{'':>3}"
+                      f"{no:>8}{mo.total_trades:>8}{mo.total_r:>+9.1f}{_pf(mo.profit_factor):>8}{mo.expectancy:>+9.3f}{flg}")
+            else:
+                print(f"  {v:<14}{ni:>7}{isf:>7}{ist:>9}{isp:>7}{'':>3}{no:>8}{'   (no OOS signals)':>34}")
+
+    # ABLATION: each lever vs baseline, multiple-testing aware (Holm). The scope (OOS vs
+    # full-window) is decided PER LEVER and applied to BOTH arms identically — never diff a
+    # lever's full-window R against the baseline's OOS R. A lever whose relevant arm (or the
+    # baseline's) has too few trades is reported 'insufficient', never promoted.
+    base = args.baseline
+    if base in full and full[base][0] is not None:
+        oos_on = bool(args.oos_ratio and args.oos_ratio > 0 and oos_data)
+
+        def _arm(v, scope):
+            """(r_values, n_trades) for variant v in the given scope ('oos' | 'full')."""
+            if scope == "oos" and v in oos_data and oos_data[v][3] is not None:
+                return oos_data[v][4], oos_data[v][3].total_trades
+            return full[v][1], (full[v][0].total_trades if full[v][0] else 0)
+
+        levers = [v for v in variants
+                  if v != base and v not in ("baseline", "freshness", "all") and full[v][0] is not None]
+        rows = []  # (v, scope, eff, ci, p, floor_ok)
+        for v in levers:
+            # prefer OOS only when BOTH arms have OOS data; else full-window for BOTH (consistent).
+            scope = "oos" if (oos_on and v in oos_data and oos_data[v][3] is not None
+                              and oos_data[base][3] is not None) else "full"
+            floor = args.min_oos_trades if scope == "oos" else args.min_trades
+            t_rv, t_n = _arm(v, scope)
+            b_rv, b_n = _arm(base, scope)
+            floor_ok = (t_n >= floor and b_n >= floor)
+            d = bootstrap_diff(t_rv, b_rv, metric="expectancy")
+            rows.append((v, scope, d, floor_ok))
+        # Holm only over the levers that clear the sample floor (the ones we can actually judge).
+        judged_idx = [i for i, r in enumerate(rows) if r[3]]
+        surv_map = {}
+        if judged_idx:
+            ps = [rows[i][2].get("p_treatment_worse_or_equal", 1.0) for i in judged_idx]
+            for i, s in zip(judged_idx, holm_threshold(ps, alpha=0.05)):
+                surv_map[i] = s
+        print(f"\n{'-'*104}\n  ABLATION vs baseline '{base}' — promote a lever ONLY if its expectancy gain is real")
+        print(f"  (Holm-corrected across judged levers, CI excludes 0), >= +0.1R, AND both arms >= the")
+        print(f"  sample floor (OOS>={args.min_oos_trades} / full>={args.min_trades} trades):")
+        for i, (v, scope, d, floor_ok) in enumerate(rows):
+            lo, hi = d.get("ci", (float("nan"), float("nan")))
+            eff = d.get("point_diff", 0.0)
+            if not floor_ok or d.get("insufficient", False):
+                print(f"  {v:<14} [{scope:>4}] d.exp {eff:+.3f}R  -> insufficient evidence (too few trades)")
+                continue
+            surv = surv_map.get(i, False)
+            ci_excl0 = (lo > 0) or (hi < 0)
+            promote = bool(surv and ci_excl0 and eff >= 0.1)
+            verdict = "PROMOTE" if promote else ("inconclusive" if eff > 0 else "no help")
+            print(f"  {v:<14} [{scope:>4}] d.exp {eff:+.3f}R  CI[{lo:+.3f}..{hi:+.3f}]  Holm={'pass' if surv else 'fail'}  -> {verdict}")
+        print(f"  (small sample: most levers should read 'inconclusive'/'insufficient' — the honest outcome.)")
+
+    # optional trade-level export for offline robustness / plots
+    if args.export:
+        out = {v: {"n_signals": len(by[v]),
+                   "trades": _run_trades(by[v], exec_df, range_start, exec_tf, VARIANTS[v])}
+               for v in variants}
+        path = os.path.join(args.out_dir, f"results_{sym}.json")
+        os.makedirs(args.out_dir, exist_ok=True)
+        with open(path, "w") as fh:
+            json.dump(out, fh, default=str)
+        print(f"\n  exported per-variant trades + signals -> {path}")
 
 
 def main():
@@ -213,6 +415,19 @@ def main():
     p.add_argument("--variants", default="baseline,freshness,all")
     p.add_argument("--verify", action="store_true")
     p.add_argument("--aggregate-only", action="store_true")
+    # --- institutional reporting (all OFF by default → legacy table unchanged) ---
+    p.add_argument("--oos-ratio", type=float, default=0.0,
+                   help="Hold out the last R fraction as OUT-OF-SAMPLE (e.g. 0.30). 0 = off.")
+    p.add_argument("--bootstrap", action="store_true",
+                   help="95%% bootstrap CIs for PF/expR/totalR + P(no edge) per variant.")
+    p.add_argument("--min-trades", type=int, default=30,
+                   help="Below this trade count a result is flagged 'insufficient evidence'.")
+    p.add_argument("--min-oos-trades", type=int, default=10,
+                   help="Min OOS trades for an OOS verdict to count.")
+    p.add_argument("--baseline", default="crypto_pct",
+                   help="Variant the ablation compares every lever against.")
+    p.add_argument("--export", action="store_true",
+                   help="Dump per-variant trade list + equity curve to <out-dir>/results_<sym>.json.")
     a = p.parse_args()
 
     db = get_db(a.db_path)
@@ -270,31 +485,7 @@ def main():
         for lbl, sigs in results:
             by[lbl].extend(sigs)
 
-    print(f"\n{'='*78}\n  BACKTEST RESULT — {a.symbol} exec_tf={a.execution_tf}")
-    print(f"  period {_span.index[0]:%Y-%m-%d}→{_span.index[-1]:%Y-%m-%d} ({_months:.1f} months, {len(_span)} bars)\n{'='*78}")
-    print(f"  {'variant':<12}{'signals':>9}{'sig/mo':>8}{'win%':>8}{'PF':>7}{'expR':>9}{'totalR':>9}{'maxDD':>8}")
-    metrics = {}
-    for v in variants:
-        m = _score(by[v], exec_df, range_start, a.execution_tf, VARIANTS[v])
-        metrics[v] = m
-        spm = len(by[v]) / _months
-        if m is None:
-            print(f"  {v:<12}{len(by[v]):>9}{spm:>8.1f}{'  (no trades)':>24}")
-        else:
-            print(f"  {v:<12}{len(by[v]):>9}{spm:>8.1f}{m.win_rate*100:>8.1f}{m.profit_factor:>7.2f}"
-                  f"{m.expectancy:>9.3f}{m.total_r:>9.1f}{m.max_drawdown_r:>8.1f}")
-    # compare every treatment variant against the live winner "freshness"
-    f = metrics.get("freshness")
-    if f:
-        for v in variants:
-            if v in ("baseline", "freshness") or not metrics.get(v):
-                continue
-            t = metrics[v]
-            n_f = len(by["freshness"]); n_t = len(by[v])
-            helps = (t.total_r >= f.total_r and t.profit_factor >= f.profit_factor)
-            print(f"\n  → {v} vs freshness: signals {n_t} vs {n_f} | "
-                  f"total R {t.total_r:+.1f} vs {f.total_r:+.1f} | PF {t.profit_factor:.2f} vs {f.profit_factor:.2f}")
-            print(f"  → {v} {'EARNS its keep (more/equal signals, PF holds) — consider deploying' if helps else 'does NOT clearly help on this sample — keep freshness'}.")
+    _report(by, exec_df, range_start, n, a.execution_tf, variants, _span, _months, a)
 
 
 if __name__ == "__main__":

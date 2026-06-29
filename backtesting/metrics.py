@@ -35,6 +35,13 @@ class MetricsResult:
     worst_trade_r: float
     avg_bars_in_trade: float
     breakdowns: Dict[str, Any] = field(default_factory=dict)
+    # --- institutional extensions (defaults keep old construction valid) ---
+    sortino: float = 0.0                # mean_r / downside-deviation (downside-only risk)
+    payoff_ratio: float = 0.0           # avg_win_r / |avg_loss_r|
+    recovery_factor: float = 0.0        # total_r / max_drawdown_r
+    longest_loss_streak: int = 0        # longest run of consecutive losing trades
+    exposure_pct: float = 0.0           # fraction of bars with an open position (0 if total_bars unknown)
+    exit_types: Dict[str, Any] = field(default_factory=dict)  # {exit_type: {count,total_r,win_rate}}
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -54,6 +61,12 @@ class MetricsResult:
             "best_trade_r": round(self.best_trade_r, 3),
             "worst_trade_r": round(self.worst_trade_r, 3),
             "avg_bars_in_trade": round(self.avg_bars_in_trade, 1),
+            "sortino": round(self.sortino, 3),
+            "payoff_ratio": round(self.payoff_ratio, 3),
+            "recovery_factor": round(self.recovery_factor, 3),
+            "longest_loss_streak": self.longest_loss_streak,
+            "exposure_pct": round(self.exposure_pct, 4),
+            "exit_types": self.exit_types,
             "breakdowns": self.breakdowns,
         }
 
@@ -61,6 +74,7 @@ class MetricsResult:
 def compute_metrics(
     trades: List[Dict[str, Any]],
     initial_balance: float = 10000.0,
+    total_bars: Optional[int] = None,
 ) -> MetricsResult:
     if not trades:
         return _empty_metrics()
@@ -101,6 +115,14 @@ def compute_metrics(
 
     breakdowns = _compute_breakdowns(trades)
 
+    # --- institutional extensions ---
+    sortino = _sortino(r_values)
+    payoff = (avg_win_r / abs(avg_loss_r)) if avg_loss_r != 0 else (float("inf") if avg_win_r > 0 else 0.0)
+    recovery = (total_r / max_dd_r) if max_dd_r > 0 else (float("inf") if total_r > 0 else 0.0)
+    loss_streak = _longest_loss_streak(r_values)
+    exit_types = _exit_type_breakdown(trades)
+    exposure = (sum(b for b in bars_in_trade if b > 0) / total_bars) if (total_bars and total_bars > 0) else 0.0
+
     return MetricsResult(
         total_trades=total_trades,
         wins=win_count,
@@ -119,6 +141,12 @@ def compute_metrics(
         worst_trade_r=worst_r,
         avg_bars_in_trade=avg_bars,
         breakdowns=breakdowns,
+        sortino=sortino,
+        payoff_ratio=payoff,
+        recovery_factor=recovery,
+        longest_loss_streak=loss_streak,
+        exposure_pct=exposure,
+        exit_types=exit_types,
     )
 
 
@@ -164,6 +192,50 @@ def _sharpe_like(r_values: List[float]) -> float:
     variance = sum((r - mean_r) ** 2 for r in r_values) / (len(r_values) - 1)
     std = math.sqrt(variance) if variance > 0 else 0
     return mean_r / std if std > 0 else 0
+
+
+def _sortino(r_values: List[float]) -> float:
+    """Per-trade Sortino: mean R / downside deviation (RMS of negative R below 0).
+    Like sharpe_like but penalises only downside volatility — NOT annualised."""
+    if len(r_values) < 2:
+        return 0
+    mean_r = sum(r_values) / len(r_values)
+    downside = [r for r in r_values if r < 0]
+    if not downside:
+        return float("inf") if mean_r > 0 else 0
+    dd = math.sqrt(sum(r * r for r in downside) / len(r_values))
+    return mean_r / dd if dd > 0 else 0
+
+
+def _longest_loss_streak(r_values: List[float]) -> int:
+    """Longest run of consecutive losing/scratch trades (r <= 0)."""
+    longest = cur = 0
+    for r in r_values:
+        if r <= 0:
+            cur += 1
+            longest = max(longest, cur)
+        else:
+            cur = 0
+    return longest
+
+
+def _exit_type_breakdown(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Group R outcomes by exit_type (tp1_hit / tp2_hit / sl_hit / forced_close / …)
+    so we can see WHERE the P&L comes from and how often each exit fires."""
+    by: Dict[str, List[float]] = {}
+    for t in trades:
+        et = t.get("exit_type", "unknown")
+        by.setdefault(str(et), []).append(t.get("r_multiple", 0))
+    out = {}
+    for et, rs in by.items():
+        w = [r for r in rs if r > 0]
+        out[et] = {
+            "count": len(rs),
+            "win_rate": len(w) / len(rs) if rs else 0,
+            "total_r": round(sum(rs), 3),
+            "avg_r": round(sum(rs) / len(rs), 3) if rs else 0,
+        }
+    return out
 
 
 def _compute_breakdowns(trades: List[Dict[str, Any]]) -> Dict[str, Any]:

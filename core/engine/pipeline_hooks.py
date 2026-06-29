@@ -279,6 +279,11 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
     mitigation = MitigationTracker()
     # how recently (in execution-TF bars) a sweep must have fired to count
     recency = int(config.get("trigger_recency_bars", 10))
+    # sweep_early lever (default OFF → live unchanged): arm on the PROVISIONAL wick
+    # (before the close-back) when no confirmed sweep is available, gated by a breakout
+    # guard. Only the backtest 'crypto_sweep' variant flips this on.
+    sweep_early = bool(config.get("sweep_early", False))
+    sweep_early_max_wick_atr = float(config.get("sweep_early_max_wick_atr", 0.5))
     # CHoCH confirms slower than a sweep — give it a wider window
     choch_recency = int(config.get("choch_recency_bars", 20))
     # the "micro" CHoCH lives on the timeframe BELOW execution (doc: "CHoCH on 5m")
@@ -306,6 +311,32 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
         ctx.sweep_confirmed = (
             last_sweep is not None and (last_pos - last_sweep["confirm_pos"]) <= recency
         )
+        # sweep_early fallback: if no CONFIRMED sweep armed the step, optionally arm on
+        # the freshest PROVISIONAL wick — but only if it's a rejection wick (real liquidity
+        # grab), not a breakout. The captured level is the genuine swept level, so SL/entry
+        # stay correct. Default OFF (sweep_early False) → this whole branch is skipped.
+        if sweep_early and not ctx.sweep_confirmed:
+            pend = sweeps.get_last_pending_sweep(sweep_df, direction=smc_dir)
+            if pend is not None and (last_pos - pend["confirm_pos"]) <= recency:
+                lvl = pend["level"]
+                ext = pend["wick_extreme"]   # the pierce extreme (high for bear, low for bull)
+                wc = pend["wick_close"]       # close on the wick bar (still BEYOND lvl — unconfirmed)
+                pen = (ext - lvl) if smc_dir == "bear" else (lvl - ext)
+                if pen > 0:
+                    # (1) REJECTION: the wick bar gave back >= half its overshoot (closed in the
+                    #     half nearer the level). A breakout marubozu closes near the extreme;
+                    #     a stop-grab rejects back toward the level. (For a PENDING sweep the close
+                    #     is still beyond the level — it hasn't fully closed back yet — so we test
+                    #     the give-back fraction, not close-vs-level which is always beyond here.)
+                    mid = (lvl + ext) / 2.0
+                    reverted = (wc <= mid) if smc_dir == "bear" else (wc >= mid)
+                    # (2) PENETRATION CAP: a large thrust past the level = conviction/continuation,
+                    #     not a stop-grab. Skip if ATR isn't available yet.
+                    atr = compute_atr(df)
+                    pen_ok = (atr <= 0) or (pen <= sweep_early_max_wick_atr * atr)
+                    if reverted and pen_ok:
+                        ctx.sweep = pend
+                        ctx.sweep_confirmed = True
 
         # --- micro-CHoCH: a recent change of character in the trade direction, on
         #     the execution TF OR the lower "micro" TF (doc: "CHoCH on 5m"). Either. ---

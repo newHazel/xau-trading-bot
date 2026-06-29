@@ -149,3 +149,57 @@ class TestEdgeCases:
         trades = [{"r_multiple": 1.0, "net_pnl": 50, "bar_entry": 0, "bar_exit": 10}]
         m = compute_metrics(trades)
         assert m.avg_bars_in_trade == 10.0
+
+
+class TestInstitutionalMetrics:
+    """The added risk-adjusted / structural metrics (defaults keep old construction valid)."""
+
+    def test_payoff_ratio(self):
+        m = compute_metrics(_mixed_trades())          # avg_win 2.0 / |avg_loss| 1.0
+        assert abs(m.payoff_ratio - 2.0) < 1e-6
+
+    def test_recovery_factor(self):
+        # wins first (5×+2 → peak 10) then 3×-1 → trough 7 → maxDD_R 3; total_r 7 → 7/3
+        m = compute_metrics(_mixed_trades())
+        assert abs(m.recovery_factor - (7.0 / 3.0)) < 1e-6
+
+    def test_longest_loss_streak(self):
+        trades = [
+            {"r_multiple": 1.0}, {"r_multiple": -1.0}, {"r_multiple": -1.0},
+            {"r_multiple": 1.0}, {"r_multiple": -1.0}, {"r_multiple": -1.0}, {"r_multiple": -1.0},
+        ]
+        assert compute_metrics(trades).longest_loss_streak == 3
+
+    def test_sortino_positive_when_profitable(self):
+        m = compute_metrics(_mixed_trades())
+        assert m.sortino > 0
+
+    def test_sortino_inf_when_no_losers(self):
+        m = compute_metrics(_winning_trades(5))
+        assert m.sortino == float("inf")
+
+    def test_exit_type_breakdown(self):
+        trades = [
+            {"r_multiple": 2.5, "exit_type": "tp2_hit"},
+            {"r_multiple": 1.0, "exit_type": "tp1_hit"},
+            {"r_multiple": -1.0, "exit_type": "sl_hit"},
+            {"r_multiple": -1.0, "exit_type": "sl_hit"},
+        ]
+        et = compute_metrics(trades).exit_types
+        assert et["sl_hit"]["count"] == 2
+        assert et["tp2_hit"]["count"] == 1
+        assert abs(et["sl_hit"]["total_r"] - (-2.0)) < 1e-6
+
+    def test_exposure_pct(self):
+        # 5 wins (5 bars each) + 3 losses (3 bars each) = 34 bars open over 100 total
+        m = compute_metrics(_mixed_trades(), total_bars=100)
+        assert abs(m.exposure_pct - 0.34) < 1e-6
+
+    def test_exposure_zero_without_total_bars(self):
+        assert compute_metrics(_mixed_trades()).exposure_pct == 0.0
+
+    def test_to_dict_has_new_fields(self):
+        d = compute_metrics(_mixed_trades()).to_dict()
+        for k in ("sortino", "payoff_ratio", "recovery_factor", "longest_loss_streak",
+                  "exposure_pct", "exit_types"):
+            assert k in d

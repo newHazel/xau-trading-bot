@@ -467,3 +467,64 @@ class TestIntegration:
         result = self._full_pipeline([10.0] * n, [8.0] * n, [9.0] * n)
         assert result["sweep_bear_level"].isna().all()
         assert result["sweep_bull_level"].isna().all()
+
+
+# ------------------------------------------------------------------ #
+# sweep_early: provisional (un-confirmed) wick exposure                #
+# ------------------------------------------------------------------ #
+
+class TestPendingSweep:
+    """get_last_pending_sweep() exposes the freshest PROVISIONAL wick (wicked beyond a
+    level but not yet closed back / expired) for the sweep_early lever, carrying
+    wick_close + wick_extreme so the caller can apply a breakout guard. The default
+    detect() output columns are untouched (no confirmed sweep written)."""
+
+    def test_pending_bear_exposed_without_closeback(self):
+        det = _det(window=5)
+        df = _make_complete_df(n=14)
+        df = _set_sh(df, 4, 100.0, swing_bar=2)
+        # wick on the LAST bar: high pierces 100 but close stays ABOVE (no close-back) → PENDING
+        df = _set_ohlc(df, 13, h=102.0, l=99.5, c=100.5)
+        result = det.detect(df)
+        assert result["sweep_bear_level"].isna().all()          # never confirmed
+        pend = det.get_last_pending_sweep(result, direction="bear")
+        assert pend is not None
+        assert pend["level"] == pytest.approx(100.0)
+        assert pend["type"] == "swing_high"
+        assert pend["wick_bar"] == 13
+        assert pend["provisional"] is True
+        assert pend["wick_close"] == pytest.approx(100.5)       # close beyond the level (unconfirmed)
+        assert pend["wick_extreme"] == pytest.approx(102.0)     # the piercing high
+
+    def test_no_pending_when_confirmed(self):
+        # single-bar sweep: wick above AND close back below → CONFIRMED, removed from pending
+        det = _det(window=5)
+        df = _make_complete_df(n=14)
+        df = _set_sh(df, 4, 100.0, swing_bar=2)
+        df = _set_ohlc(df, 12, h=102.0, l=97.0, c=98.0)         # closes below 100 → confirmed
+        result = det.detect(df)
+        assert result["sweep_bear_level"].iloc[12] == pytest.approx(100.0)
+        assert det.get_last_pending_sweep(result, direction="bear") is None
+
+    def test_pending_bull_exposed(self):
+        det = _det(window=5)
+        df = _make_complete_df(n=14)
+        df = _set_sl(df, 4, 5.0, swing_bar=2)
+        # wick on the last bar: low pierces 5 but close stays BELOW (no close-back) → PENDING
+        df = _set_ohlc(df, 13, l=3.0, h=8.0, c=4.5)
+        result = det.detect(df)
+        assert result["sweep_bull_level"].isna().all()
+        pend = det.get_last_pending_sweep(result, direction="bull")
+        assert pend is not None
+        assert pend["level"] == pytest.approx(5.0)
+        assert pend["wick_bar"] == 13
+        assert pend["wick_extreme"] == pytest.approx(3.0)       # the piercing low
+        assert pend["wick_close"] == pytest.approx(4.5)
+
+    def test_none_when_never_wicked(self):
+        det = _det(window=5)
+        df = _make_complete_df(n=14)
+        df = _set_sh(df, 4, 100.0, swing_bar=2)                  # level exists, never pierced
+        result = det.detect(df)
+        assert det.get_last_pending_sweep(result, direction="bear") is None
+        assert det.get_last_pending_sweep(result, direction="bull") is None

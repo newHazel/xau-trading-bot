@@ -78,6 +78,11 @@ class SweepDetector:
         if window < 1:
             raise ValueError(f"window must be >= 1, got {window}")
         self._window = int(window)
+        # sweep_early exposure (default-OFF feature): snapshot of the wicks still
+        # PENDING (wicked beyond a level, not yet closed-back or expired) at the last
+        # bar of detect(). Written every detect() but READ only by get_last_pending_sweep.
+        self._last_pending_bear: List[Dict] = []
+        self._last_pending_bull: List[Dict] = []
 
     # ---------------------------------------------------------------- #
     # Public API                                                         #
@@ -96,6 +101,10 @@ class SweepDetector:
              level value is marked as consumed.
         """
         self._validate(df)
+        # Reset per-call so a prior bar's pending wicks never leak (detect() is re-run
+        # every bar by make_smc_hook on a shared SweepDetector instance).
+        self._last_pending_bear = []
+        self._last_pending_bull = []
 
         result = df.copy()
         n = len(result)
@@ -213,6 +222,13 @@ class SweepDetector:
                 ]
                 n_bull += 1
 
+        # Snapshot the wicks still alive (pending: wicked, not yet closed-back or expired)
+        # at the last processed bar, for the optional sweep_early provisional-arm path.
+        # Copy so later mutation can't alias. No output column is touched → default-OFF
+        # behaviour is byte-for-byte unchanged.
+        self._last_pending_bear = [dict(p) for p in pending_bear]
+        self._last_pending_bull = [dict(p) for p in pending_bull]
+
         # Assign each accumulated column ONCE (avoids per-cell _setitem_with_indexer).
         result["sweep_bull_level"]    = a_bul_l
         result["sweep_bull_type"]     = a_bul_t
@@ -248,6 +264,41 @@ class SweepDetector:
             "type":        str(df_with_sweeps.loc[confirm_ts, col_t]),
             "wick_bar":    int(df_with_sweeps.loc[confirm_ts, col_w]),
             "direction":   direction,
+        }
+
+    def get_last_pending_sweep(
+        self,
+        df_with_sweeps: pd.DataFrame,
+        direction: str = "bull",
+    ) -> Optional[Dict]:
+        """Return the freshest PROVISIONAL sweep — wicked beyond a level but NOT yet
+        closed-back/confirmed (or expired) — of `direction`, or None.
+
+        Used ONLY by the sweep_early lever to arm the sequence earlier (on the wick,
+        before the slower close-back). `confirm_pos` is deliberately the WICK bar, so the
+        caller's recency check `(last_pos - confirm_pos) <= recency` measures bars-since-
+        wick. Carries `wick_close` + `wick_extreme` so the caller can apply a breakout
+        guard (a real sweep closes back through the level; a breakout closes beyond it).
+        Reads only the last detect() snapshot — O(#pending), runs no detection."""
+        pend = self._last_pending_bull if direction == "bull" else self._last_pending_bear
+        if not pend:
+            return None
+        p = max(pend, key=lambda x: x["wick_bar"])    # freshest wick
+        wb = int(p["wick_bar"])
+        if wb < 0 or wb >= len(df_with_sweeps):
+            return None
+        row = df_with_sweeps.iloc[wb]
+        extreme = float(row["high"]) if direction == "bear" else float(row["low"])
+        return {
+            "confirm_ts":   df_with_sweeps.index[wb],
+            "confirm_pos":  wb,            # = wick bar (provisional): recency = bars-since-wick
+            "level":        float(p["level"]),
+            "type":         str(p["type"]),
+            "wick_bar":     wb,
+            "direction":    direction,
+            "provisional":  True,
+            "wick_close":   float(row["close"]),
+            "wick_extreme": extreme,
         }
 
     # ---------------------------------------------------------------- #
