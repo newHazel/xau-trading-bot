@@ -1,0 +1,44 @@
+# Render Blueprint — 24/7 LIVE ALERTS bot (alerts-only; gold + crypto fleet).
+# ─────────────────────────────────────────────────────────────────────────────
+# Deploy:  Render Dashboard → New → Blueprint → connect github.com/newHazel/xau-trading-bot
+#          → Apply.  Then fill the secret env vars (TELEGRAM_*, TWELVE_DATA_API_KEY).
+#
+# Runs the SAME process Railway did — `python scripts/live_all.py` (both bots under
+# one auto-restarting supervisor) via the repo Dockerfile. ALERTS ONLY — no trading.
+#
+# WHY A WORKER (not a Web Service): the bot is a long-running poll loop with no HTTP
+# port. Render Background Workers run 24/7; free Web Services SLEEP after 15 min idle.
+# Background Workers are PAID (no free tier) — Starter ≈ $7/mo.
+#
+# BACKTESTS DO NOT BELONG HERE — keep them on RunPod (scripts/run_runpod_backtest.sh):
+# a 0.5-CPU worker can't run the 9-coin parallel backtest, and you'd pay for it 24/7.
+#
+# If Render's parser rejects `runtime: docker`, change it to `env: docker` (older schema).
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  - type: worker
+    name: xau-bot-live
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    branch: master
+    region: frankfurt          # non-US → clean Binance access (US blocks api.binance.com;
+                               # the fetcher falls back to data-api.binance.vision anyway).
+    plan: starter              # 512 MB / 0.5 CPU (~$7/mo). Bump to `standard` if RAM is tight.
+    autoDeploy: true           # redeploy on every push to master (same as Railway).
+    envVars:
+      - key: TZ
+        value: Asia/Jerusalem
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false            # set in the dashboard — secret, NEVER committed to git.
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: TWELVE_DATA_API_KEY
+        sync: false            # required for the gold bot (Twelve Data).
+      - key: BINANCE_API_KEY
+        sync: false            # optional — Binance klines are public; a key only raises limits.
+    disk:
+      name: xau-data
+      mountPath: /app/data     # SQLite DB + OutcomeTracker forward record survive redeploys.
+      sizeGB: 1
