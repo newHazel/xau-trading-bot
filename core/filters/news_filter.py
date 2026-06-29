@@ -81,6 +81,11 @@ class NewsFilter:
         self._degraded_max_grade = self._fallback_cfg.get("degraded_mode_max_grade", "B")
         self._events: List[NewsEvent] = []
         self._data_loaded = False
+        # Whether we've ALREADY tried to auto-load (via ensure_loaded). A failed load
+        # (e.g. no manual CSV) leaves _data_loaded False, so without this flag every
+        # subsequent is_blocked()/check() call would retry the load and re-log the
+        # "CSV not found" warning — once per coin per cycle = log spam. Try once.
+        self._load_attempted = False
         self._project_root = project_root
 
     def load_from_api(self, events: List[Dict[str, Any]]) -> None:
@@ -116,8 +121,11 @@ class NewsFilter:
             return False
 
     def ensure_loaded(self) -> None:
-        if self._data_loaded:
+        # Already loaded, or already tried (and failed) once → don't retry / re-log.
+        # An explicit load_from_csv(path) / load_from_api() can still load later.
+        if self._data_loaded or self._load_attempted:
             return
+        self._load_attempted = True
         if self._fallback_cfg.get("use_manual_csv_if_api_fails", True):
             self.load_from_csv()
 
