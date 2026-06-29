@@ -24,7 +24,14 @@ services:
     region: frankfurt          # non-US → clean Binance access (US blocks api.binance.com;
                                # the fetcher falls back to data-api.binance.vision anyway).
     plan: starter              # 512 MB / 0.5 CPU (~$7/mo). Bump to `standard` if RAM is tight.
-    autoDeploy: true           # redeploy on every push to master (same as Railway).
+    autoDeploy: true           # redeploy on push to master — but only for CODE (see buildFilter).
+    # The repo has an hourly GitHub Action that commits candle CSVs (`chore(data): …`).
+    # The LIVE bot fetches fresh data at runtime and does NOT use those committed CSVs
+    # (they're for the RunPod backtest only), so a data-only commit must NOT redeploy /
+    # restart the worker. Skip deploys whose changed files are all under data/.
+    buildFilter:
+      ignoredPaths:
+        - "data/**"
     envVars:
       - key: TZ
         value: Asia/Jerusalem
