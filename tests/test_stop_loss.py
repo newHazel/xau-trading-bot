@@ -116,3 +116,38 @@ class TestEdgeCases:
         c = StopLossCalculator({})
         r = c.calculate("long", entry=2000.0, atr=5.0, sweep_low=1996.0)
         assert r.valid
+
+
+class TestSlAtrFloor:
+    """sl_atr_floor_mult widens a noise-tight SL to a minimum k*ATR (default 0 = off).
+    The ETH 11:50 case: a tight SL wicked by a bounce before price went the trade's way."""
+
+    def _calc(self, floor, max_mult=3.0):
+        return StopLossCalculator({
+            "sl_invalidation_mode": "min_of_sweep_and_fvg",
+            "sl_buffer_atr_ratio": 0.20, "atr_sl_multiplier": max_mult,
+            "sl_atr_floor_mult": floor,
+        })
+
+    def test_floor_off_leaves_tight_sl(self):
+        # default floor 0 → structural SL unchanged (entry-fvg = 2.0 < 1.5*ATR=7.5)
+        r = self._calc(0.0, max_mult=1.5).calculate("long", entry=2000.0, atr=5.0, fvg_bottom=1999.0)
+        assert r.valid and abs(r.sl_distance - 2.0) < 1e-6
+
+    def test_floor_widens_tight_long_sl(self):
+        # structural distance 2.0 < floor 2*ATR=10 → widened to 10; SL = 2000-10
+        r = self._calc(2.0).calculate("long", entry=2000.0, atr=5.0, fvg_bottom=1999.0)
+        assert r.valid
+        assert abs(r.sl_distance - 10.0) < 1e-6
+        assert abs(r.sl_price - 1990.0) < 1e-6
+
+    def test_floor_widens_tight_short_sl(self):
+        r = self._calc(2.0).calculate("short", entry=2000.0, atr=5.0, fvg_top=2001.0)
+        assert r.valid
+        assert abs(r.sl_distance - 10.0) < 1e-6
+        assert abs(r.sl_price - 2010.0) < 1e-6
+
+    def test_floor_does_not_shrink_a_wide_sl(self):
+        # structural distance already 6.0 > floor 1*ATR=5 → unchanged
+        r = self._calc(1.0, max_mult=3.0).calculate("long", entry=2000.0, atr=5.0, fvg_bottom=1995.0)
+        assert r.valid and abs(r.sl_distance - 6.0) < 1e-6  # 1995-1.0 buffer = 1994 → dist 6

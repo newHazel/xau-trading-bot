@@ -117,3 +117,29 @@ class TestComputeRSI:
     def test_too_short_returns_neutral(self):
         from core.engine.pipeline_hooks import compute_rsi
         assert compute_rsi(pd.DataFrame({"close": [100, 101]}), 14) == 50.0
+
+
+class TestComputeEmaBias:
+    """compute_ema_bias: exec-TF EMA50/200 trend used by the trend_gate."""
+
+    def _df(self, closes):
+        n = len(closes)
+        idx = pd.date_range("2026-01-01", periods=n, freq="5min", tz="UTC")
+        return pd.DataFrame({"open": closes, "high": closes, "low": closes,
+                             "close": closes, "volume": [1.0] * n}, index=idx)
+
+    def test_uptrend_is_long(self):
+        from core.engine.pipeline_hooks import compute_ema_bias
+        assert compute_ema_bias(self._df([100.0 + i for i in range(250)])) == "long"
+
+    def test_downtrend_is_short(self):
+        from core.engine.pipeline_hooks import compute_ema_bias
+        assert compute_ema_bias(self._df([350.0 - i for i in range(250)])) == "short"
+
+    def test_flat_is_neutral(self):
+        from core.engine.pipeline_hooks import compute_ema_bias
+        assert compute_ema_bias(self._df([100.0] * 250)) == "neutral"
+
+    def test_insufficient_bars_neutral(self):
+        from core.engine.pipeline_hooks import compute_ema_bias
+        assert compute_ema_bias(self._df([100.0 + i for i in range(150)])) == "neutral"

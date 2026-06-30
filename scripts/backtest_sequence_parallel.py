@@ -117,6 +117,13 @@ VARIANTS.update({
     # (scripts/fetch_funding_history.py). Hypothesis: avoids squeeze-prone counter-trend
     # longs — the bucket that bled. The first NON-price-derived signal in the ablation.
     "crypto_funding": {**_CRYPTO_PCT, "funding_filter": True},
+    # trend gate: require the exec-TF EMA50/200 trend to NOT oppose the trade (neutral
+    # allowed). Targets the proven counter-trend-LONG bleed in a down regime.
+    "crypto_trend": {**_CRYPTO_PCT, "trend_gate": True},
+    # wider SL band: floor the SL at 2x ATR (no noise-tight stops) and raise the max to 3x.
+    # Targets the ETH 11:50 case — a tight SL wicked by a bounce, then price went the trade's
+    # way. Trade-off: wider SL lowers R:R → fewer pass the rr gate. The ablation decides.
+    "crypto_slfloor": {**_CRYPTO_PCT, "sl_atr_floor_mult": 2.0, "atr_sl_multiplier": 3.0},
 })
 
 

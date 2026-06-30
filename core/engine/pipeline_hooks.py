@@ -112,6 +112,23 @@ def compute_rsi(df: pd.DataFrame, period: int = 14) -> float:
     return 100.0 - 100.0 / (1.0 + rs)
 
 
+def compute_ema_bias(df: pd.DataFrame, fast: int = 50, slow: int = 200) -> str:
+    """Execution-TF trend bias from EMA50/EMA200: 'long' if price>EMA200 AND EMA50>EMA200,
+    'short' if price<EMA200 AND EMA50<EMA200, else 'neutral'. Used by the trend_gate to
+    block COUNTER-TREND entries (the longs that bled in a down regime). Lightweight."""
+    if df is None or len(df) < slow:
+        return "neutral"
+    close = df["close"].astype(float)
+    ema_f = float(close.ewm(span=fast, adjust=False).mean().iloc[-1])
+    ema_s = float(close.ewm(span=slow, adjust=False).mean().iloc[-1])
+    price = float(close.iloc[-1])
+    if price > ema_s and ema_f > ema_s:
+        return "long"
+    if price < ema_s and ema_f < ema_s:
+        return "short"
+    return "neutral"
+
+
 def _collect_levels(liq_df: pd.DataFrame, swing_df: pd.DataFrame, smc_dir: str) -> list:
     """Build a [{price, type}] list of liquidity pools for the TP-target finder.
 
@@ -444,6 +461,17 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
             ctx.extra["momentum_ok"] = (rsi >= float(config.get("rsi_long_min", 45.0))) if is_long \
                 else (rsi <= float(config.get("rsi_short_max", 55.0)))
 
+        # --- trend gate (trend_gate, default OFF): block COUNTER-TREND entries ---
+        # The backtest showed longs bleed in a down regime. Require the execution-TF
+        # EMA50/EMA200 trend bias to AGREE with the trade direction (a 'neutral' bias is
+        # allowed — only an OPPOSING trend blocks). Sets trend_ok; filter_hook folds it into
+        # no_blocking_filters. Default OFF → trend_ok absent → live unchanged.
+        if config.get("trend_gate", False):
+            bias = compute_ema_bias(df, int(config.get("trend_ema_fast", 50)),
+                                    int(config.get("trend_ema_slow", 200)))
+            ctx.extra["trend_bias"] = bias
+            ctx.extra["trend_ok"] = (bias != "short") if is_long else (bias != "long")
+
     return hook
 
 
@@ -538,10 +566,15 @@ def make_filter_hook(config: Optional[Dict[str, Any]] = None,
             ctx.extra["funding_rate"] = rate
             funding_ok = not funding_blocks(regime, ctx.direction)
 
+        # trend gate (set in smc_hook, which runs before this filter): block a
+        # counter-trend entry. Absent (trend_gate OFF) → defaults True → unchanged.
+        trend_ok = bool(ctx.extra.get("trend_ok", True))
+
         # no_blocking_filters covers the AUXILIARY filters only. kill_zone and
         # news_clear are their own separate mandatory conditions — don't double-count
         # them here (that would fail two mandatories at once on any off-session bar).
-        ctx.no_blocking_filters = bool(spread_ok and vol_ok and state_ok and corr_ok and funding_ok)
+        ctx.no_blocking_filters = bool(spread_ok and vol_ok and state_ok and corr_ok
+                                       and funding_ok and trend_ok)
 
         # DXY alignment (optional booster). Needs a DXY DataFrame in history.
         dxy_df = _tf(history, "dxy")

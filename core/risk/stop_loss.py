@@ -46,6 +46,11 @@ class StopLossCalculator:
         self._mode = config.get("sl_invalidation_mode", "min_of_sweep_and_fvg")
         self._buffer_ratio = config.get("sl_buffer_atr_ratio", 0.20)
         self._max_sl_atr_mult = config.get("atr_sl_multiplier", 1.5)
+        # MINIMUM SL distance as a multiple of ATR (default 0 = OFF). When > 0, a too-tight
+        # structural SL is WIDENED to this floor so it isn't stopped out by ordinary noise
+        # (the ETH 11:50 case: a 2.46-pt SL wicked by a ~3-pt bounce, then price went the
+        # trade's way). Trade-off: a wider SL lowers R:R → fewer pass the rr gate. Backtest it.
+        self._atr_floor_mult = config.get("sl_atr_floor_mult", 0.0)
 
     def calculate(
         self,
@@ -78,6 +83,13 @@ class StopLossCalculator:
 
         if distance <= 0:
             return self._invalid(f"SL beyond entry: distance={distance:.2f}")
+
+        # ATR floor (default off): widen a too-tight SL so noise doesn't stop it out.
+        if self._atr_floor_mult > 0 and atr > 0:
+            min_distance = atr * self._atr_floor_mult
+            if distance < min_distance:
+                distance = min_distance
+                sl = (entry - distance) if direction == "long" else (entry + distance)
 
         if distance > max_distance:
             return StopLossResult(
