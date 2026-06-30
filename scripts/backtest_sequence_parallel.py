@@ -42,6 +42,7 @@ from core.engine.pipeline_config import assemble_pipeline_config
 from backtesting.backtest_runner import BacktestRunner, BacktestConfig
 from backtesting.metrics import compute_metrics
 from backtesting.bootstrap import bootstrap_ci, bootstrap_diff, holm_threshold
+from core.data.funding_provider import load_funding
 
 _TFS = ["4h", "1h", "15m", "5m", "1m"]
 DB_DEFAULT = "data/database/trading_bot.sqlite"
@@ -111,6 +112,11 @@ VARIANTS.update({
     # instead of waiting for the confirmed close-back — catch the move before it's too
     # late / already reversed (the user's core complaint). Hypothesis: more/earlier fills.
     "crypto_sweep": {**_CRYPTO_PCT, "sweep_early": True},
+    # funding (ORTHOGONAL): block a fresh trade on the crowded perp side (long into
+    # crowded-long funding / short into crowded-short). Needs data/funding/<SYM>/funding.csv
+    # (scripts/fetch_funding_history.py). Hypothesis: avoids squeeze-prone counter-trend
+    # longs — the bucket that bled. The first NON-price-derived signal in the ablation.
+    "crypto_funding": {**_CRYPTO_PCT, "funding_filter": True},
 })
 
 
@@ -157,6 +163,12 @@ def _gen_chunk(task):
             pass  # corrupt/partial checkpoint → regenerate
     db = get_db(db_path)
     full = {tf: _load(db, symbol, tf) for tf in _TFS}
+    # Orthogonal funding series (per-coin) for the funding_filter variant. Added as a
+    # pseudo-timeframe so the existing _win() windowing + hist plumbing carry it to the
+    # hooks leak-free; absent -> simply not in history and the gate stays off.
+    _fdf = load_funding(symbol)
+    if _fdf is not None and not _fdf.empty:
+        full["funding"] = _fdf
     exec_df = full[exec_tf]
     cfg = dict(assemble_pipeline_config("config"))
     for _k, _v in overrides.items():  # one-level deep-merge so e.g. rr_tiers isn't clobbered

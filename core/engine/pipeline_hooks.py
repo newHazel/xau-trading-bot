@@ -470,6 +470,15 @@ def make_filter_hook(config: Optional[Dict[str, Any]] = None,
     state_f = MarketStateFilter(config.get("market_state", config))
     corr_f = CorrelationSpikeFilter(config.get("correlation", config))
 
+    # funding_filter (default OFF, ORTHOGONAL signal): block a FRESH trade on the
+    # crowded perp side (long into crowded-long funding / short into crowded-short),
+    # read from history["funding"]. Only the backtest crypto_funding variant turns it
+    # on → live unchanged. Thesis: avoids squeeze-prone counter-trend longs that bled.
+    funding_filter = bool(config.get("funding_filter", False))
+    funding_window = int(config.get("funding_window", 90))
+    funding_hi = float(config.get("funding_hi_pct", 0.80))
+    funding_lo = float(config.get("funding_lo_pct", 0.20))
+
     # Load the news calendar once. Prefer an explicit CSV path; else the default.
     news_csv = config.get("news_csv_path")
     if news_csv:
@@ -517,10 +526,22 @@ def make_filter_hook(config: Optional[Dict[str, Any]] = None,
                 dxy_closes = dxy_df["close"].astype(float).tolist()
                 corr_ok = not corr_f.is_spike(xau_closes, dxy_closes)
 
+        # funding (orthogonal positioning signal): block the crowded perp side when the
+        # flag is on AND the per-coin funding series is present in history. Default OFF →
+        # funding_ok stays True and no_blocking_filters is unchanged.
+        funding_ok = True
+        if funding_filter:
+            from core.data.funding_provider import funding_regime, funding_blocks
+            fdf = history.get("funding") if isinstance(history, dict) else None
+            regime, rate = funding_regime(fdf, ts, funding_window, funding_hi, funding_lo)
+            ctx.extra["funding_regime"] = regime
+            ctx.extra["funding_rate"] = rate
+            funding_ok = not funding_blocks(regime, ctx.direction)
+
         # no_blocking_filters covers the AUXILIARY filters only. kill_zone and
         # news_clear are their own separate mandatory conditions — don't double-count
         # them here (that would fail two mandatories at once on any off-session bar).
-        ctx.no_blocking_filters = bool(spread_ok and vol_ok and state_ok and corr_ok)
+        ctx.no_blocking_filters = bool(spread_ok and vol_ok and state_ok and corr_ok and funding_ok)
 
         # DXY alignment (optional booster). Needs a DXY DataFrame in history.
         dxy_df = _tf(history, "dxy")

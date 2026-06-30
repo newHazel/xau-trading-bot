@@ -61,8 +61,10 @@ OUT_ROOT="${OUT_ROOT:-${PERSIST_DIR}/bt_checkpoints}"
 JOBS="${JOBS:-$($PY -c 'import os;print(max(1,(os.cpu_count() or 2)-1))')}"
 SYMBOLS="${SYMBOLS:-ETHUSDT DOGEUSDT SOLUSDT LINKUSDT AVAXUSDT NEARUSDT SUIUSDT SANDUSDT ZECUSDT}"
 # Institutional ablation: crypto_pct = the live crypto BASELINE; crypto_mom = +momentum
-# gate (no falling-knife); crypto_sweep = +sweep-early (catch the move before it reverses).
-VARIANTS="${VARIANTS:-crypto_pct,crypto_mom,crypto_sweep}"
+# gate (no falling-knife); crypto_sweep = +sweep-early; crypto_funding = +funding gate
+# (ORTHOGONAL — blocks the crowded perp side; needs data/funding/<SYM>/funding.csv committed).
+# Tip: for a FAST focused funding test use  VARIANTS=crypto_pct,crypto_funding
+VARIANTS="${VARIANTS:-crypto_pct,crypto_mom,crypto_sweep,crypto_funding}"
 TOTAL_BARS="${TOTAL_BARS:-31000}"    # full committed window (~3.7 months of 5m bars)
 CHUNK_BARS="${CHUNK_BARS:-$(( TOTAL_BARS / JOBS ))}"; [ "${CHUNK_BARS}" -lt 1500 ] 2>/dev/null && CHUNK_BARS=1500
 START="${START:-2026-03-01}"
