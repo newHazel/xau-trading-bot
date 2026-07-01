@@ -59,7 +59,9 @@ DB_PATH="${DB_PATH:-${PERSIST_DIR}/trading_bot.sqlite}"
 OUT_ROOT="${OUT_ROOT:-${PERSIST_DIR}/bt_checkpoints}"
 
 JOBS="${JOBS:-$($PY -c 'import os;print(max(1,(os.cpu_count() or 2)-1))')}"
-SYMBOLS="${SYMBOLS:-ETHUSDT DOGEUSDT SOLUSDT LINKUSDT AVAXUSDT NEARUSDT SUIUSDT SANDUSDT ZECUSDT}"
+# NOTE: use ${VAR-default} (no colon) so an EXPLICIT empty SYMBOLS="" skips the crypto
+# fleet (gold-only run) instead of falling back to the default 9 coins.
+SYMBOLS="${SYMBOLS-ETHUSDT DOGEUSDT SOLUSDT LINKUSDT AVAXUSDT NEARUSDT SUIUSDT SANDUSDT ZECUSDT}"
 # Ablation levers (each = crypto_pct BASELINE + one change):
 #   crypto_mom     +momentum gate (no falling-knife)        crypto_sweep   +sweep-early
 #   crypto_funding +funding gate (orthogonal, crowded side) crypto_trend   +EMA200 trend gate (no counter-trend)
