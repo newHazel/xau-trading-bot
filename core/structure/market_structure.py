@@ -5,10 +5,17 @@ Classifies confirmed swing highs/lows as:
   HH (Higher High), LH (Lower High), EH (Equal High)
   HL (Higher Low),  LL (Lower Low),  EL (Equal Low)
 
-Bias rules (both sides must agree):
+Bias rules (strict, both sides must agree):
   bullish  = last confirmed HH + HL
   bearish  = last confirmed LH + LL
   neutral  = mixed, equal, or insufficient data
+
+Relaxed bias (opt-in, default OFF — see MarketStructure(relaxed_bias=True)):
+  A single directional side (HH/LH on the high side, or HL/LL on the low side)
+  with the OPPOSITE side not yet confirmed also sets a directional bias. In a
+  clean trend the counter-trend side rarely prints a fractal, so the strict rule
+  leaves bias 'neutral' for whole legs and silently zeroes the micro-CHoCH stage
+  (a reversal CHoCH can only fire from a directional bias). Backtest-gated.
 
 No look-ahead: reads only from SwingDetector-confirmed swings,
 processes bars strictly left-to-right.
@@ -29,11 +36,28 @@ logger = logging.getLogger(__name__)
 # Internal helpers                                                     #
 # ------------------------------------------------------------------ #
 
-def _bias_from(high_label: Optional[str], low_label: Optional[str]) -> str:
+def _bias_from(high_label: Optional[str], low_label: Optional[str],
+               relaxed: bool = False) -> str:
+    # Strict: both sides agree.
     if high_label == "HH" and low_label == "HL":
         return "bullish"
     if high_label == "LH" and low_label == "LL":
         return "bearish"
+    if relaxed:
+        # One side is directional and the OPPOSITE side has no confirmed swing yet
+        # (label None). Lean to the labelled side when the other is merely ABSENT —
+        # NEVER when it actively disagrees (HH+LL / LH+HL stay 'neutral'), and never
+        # for equal labels (EH/EL are non-directional). This stops a clean trend,
+        # where the counter-trend side rarely prints a fractal, from sitting neutral
+        # and starving the micro-CHoCH stage.
+        if low_label is None and high_label == "HH":
+            return "bullish"
+        if high_label is None and low_label == "HL":
+            return "bullish"
+        if low_label is None and high_label == "LH":
+            return "bearish"
+        if high_label is None and low_label == "LL":
+            return "bearish"
     return "neutral"
 
 
@@ -70,6 +94,13 @@ class MarketStructure:
               swing_label_low   — "HL" | "LL" | "EL" | None
               structure_bias    — "bullish" | "bearish" | "neutral" on every bar
     """
+
+    def __init__(self, relaxed_bias: bool = False) -> None:
+        # relaxed_bias (default OFF → live unchanged): allow a directional bias from
+        # ONE confirmed side when the opposite side has not printed a swing yet, so a
+        # clean trend does not sit 'neutral' and starve the micro-CHoCH stage.
+        # Backtest-gated via config 'relaxed_structure_bias'. See _bias_from().
+        self._relaxed_bias = bool(relaxed_bias)
 
     # ---------------------------------------------------------------- #
     # Public API                                                         #
@@ -116,7 +147,7 @@ class MarketStructure:
                     last_low_label = label
                 prev_low = float(sl)
 
-            bias_arr[pos] = _bias_from(last_high_label, last_low_label)
+            bias_arr[pos] = _bias_from(last_high_label, last_low_label, self._relaxed_bias)
 
         result["swing_label_high"] = labels_high
         result["swing_label_low"]  = labels_low

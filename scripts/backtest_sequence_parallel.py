@@ -137,6 +137,18 @@ _FRESHNESS = VARIANTS["freshness"]
 VARIANTS.update({
     "gold_confirm": {**_FRESHNESS, "confirm_gate": True, "confirm_min_body_atr": 0.4},
     "gold_trend":   {**_FRESHNESS, "trend_gate": True},
+    # --- 2026-07-01 indicator-audit fixes (all default OFF in live; A/B here) ---
+    # #3: relaxed structure bias — one directional side sets bias when the opposite
+    #     side has no confirmed swing yet, so clean trends don't sit 'neutral' and
+    #     zero out the micro-CHoCH stage. Expected to RAISE count in trends.
+    "gold_relaxbias": {**_FRESHNESS, "relaxed_structure_bias": True},
+    # #10: premium/discount zone computed on the 15m execution range instead of 1H —
+    #      the range entries actually trade. Accuracy fix; count effect unknown sign.
+    "gold_zone15m":   {**_FRESHNESS, "price_zone_on_15m": True},
+    # #4: make smc_rules.yaml authoritative (previously the detector levers were dead)
+    #     AND loosen the FVG size gate 0.3→0.2 to raise count. NB: also flips displacement
+    #     break_lookback 3→5 (grade-only). A real count lever now that config is wired.
+    "gold_wire02":    {**_FRESHNESS, "wire_detector_config": True, "fvg_min_atr_ratio": 0.2},
 })
 
 

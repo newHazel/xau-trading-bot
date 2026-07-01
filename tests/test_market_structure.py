@@ -504,3 +504,71 @@ class TestIntegration:
         # At least one HH should exist if peak 2 > peak 1
         high_labels = result["swing_label_high"].dropna()
         assert "HH" in high_labels.values
+
+
+# ------------------------------------------------------------------ #
+# Relaxed bias (opt-in) — one directional side sets a bias when the    #
+# opposite side has not printed a swing yet. Default (strict) keeps     #
+# 'neutral' for these (asserted by TestBiasClassification above).       #
+# ------------------------------------------------------------------ #
+
+class TestRelaxedBias:
+    @staticmethod
+    def _relaxed():
+        return MarketStructure(relaxed_bias=True)
+
+    def test_default_is_strict(self):
+        # HH alone → strict default stays neutral (unchanged live behavior).
+        df = _make_swing_df()
+        df = _set_sh(df, 2, 20.0)
+        df = _set_sh(df, 8, 25.0)
+        assert MarketStructure().classify(df)["structure_bias"].iloc[8] == "neutral"
+
+    def test_relaxed_HH_alone_is_bullish(self):
+        df = _make_swing_df()
+        df = _set_sh(df, 2, 20.0)
+        df = _set_sh(df, 8, 25.0)   # HH, no low labelled
+        assert self._relaxed().classify(df)["structure_bias"].iloc[8] == "bullish"
+
+    def test_relaxed_LL_alone_is_bearish(self):
+        df = _make_swing_df()
+        df = _set_sl(df, 2, 8.0)
+        df = _set_sl(df, 8, 5.0)    # LL, no high labelled
+        assert self._relaxed().classify(df)["structure_bias"].iloc[8] == "bearish"
+
+    def test_relaxed_LH_alone_is_bearish(self):
+        df = _make_swing_df()
+        df = _set_sh(df, 2, 25.0)
+        df = _set_sh(df, 8, 20.0)   # LH, no low labelled
+        assert self._relaxed().classify(df)["structure_bias"].iloc[8] == "bearish"
+
+    def test_relaxed_HL_alone_is_bullish(self):
+        df = _make_swing_df()
+        df = _set_sl(df, 2, 5.0)
+        df = _set_sl(df, 8, 8.0)    # HL, no high labelled
+        assert self._relaxed().classify(df)["structure_bias"].iloc[8] == "bullish"
+
+    def test_relaxed_conflict_stays_neutral(self):
+        # HH + LL disagree (expansion) → neutral even when relaxed.
+        df = _make_swing_df()
+        df = _set_sh(df, 2, 20.0)
+        df = _set_sh(df, 6, 25.0)   # HH
+        df = _set_sl(df, 4, 8.0)
+        df = _set_sl(df, 10, 5.0)   # LL
+        assert self._relaxed().classify(df)["structure_bias"].iloc[10] == "neutral"
+
+    def test_relaxed_equal_alone_stays_neutral(self):
+        # EH (non-directional) with no low → neutral even when relaxed.
+        df = _make_swing_df()
+        df = _set_sh(df, 2, 20.0)
+        df = _set_sh(df, 8, 20.0)   # EH
+        assert self._relaxed().classify(df)["structure_bias"].iloc[8] == "neutral"
+
+    def test_relaxed_preserves_strict_both_sides(self):
+        # HH + HL still bullish under relaxed (strict rule takes precedence).
+        df = _make_swing_df()
+        df = _set_sh(df, 2, 20.0)
+        df = _set_sl(df, 4, 5.0)
+        df = _set_sh(df, 8, 25.0)   # HH
+        df = _set_sl(df, 12, 8.0)   # HL
+        assert self._relaxed().classify(df)["structure_bias"].iloc[12] == "bullish"

@@ -240,7 +240,7 @@ def make_structure_hook(config: Optional[Dict[str, Any]] = None,
     from core.structure.bias_conflict_resolver import HTFConflictResolver
 
     swings = SwingDetector(config.get("fractal_windows"))
-    structure = MarketStructure()
+    structure = MarketStructure(relaxed_bias=config.get("relaxed_structure_bias", False))
     pd_zone = PremiumDiscountAnalyzer()
     resolver = HTFConflictResolver()
 
@@ -277,10 +277,24 @@ def make_structure_hook(config: Optional[Dict[str, Any]] = None,
         # record whether 4H agrees, for downstream confluence/booster use
         ctx.extra["htf_4h_aligned"] = (combined_dir == bias_1h_dir and combined_dir in ("long", "short"))
 
-        # 15m alignment + premium/discount zone (on MTF here; TODO(user): use 15m TF)
+        # 15m alignment + premium/discount zone.
         ctx.structure_15m = bias_1h_dir if bias_1h_dir in ("long", "short") else None
-        pd_df = pd_zone.analyze(mtf_swings)
-        ctx.price_zone = pd_zone.get_current_zone(pd_df)  # "premium"/"discount"/"equilibrium"
+        # price_zone: default on the 1H (MTF) dealing range. Opt-in (backtest-gated,
+        # default OFF → live unchanged): compute it on the 15m execution range the
+        # entries actually trade. The coarser 1H range flips halves slowly and can both
+        # over-reject (15m already in discount but 1H still premium) and under-reject
+        # relative to a true 15m zone — the price_zone gate is mandatory, so this
+        # mislabels which setups survive (audit finding). Backtest to pick.
+        if config.get("price_zone_on_15m", False):
+            df_15m = _tf(history, "15m")
+            if df_15m is not None and len(df_15m) >= 30:
+                sw_15m = swings.detect(df_15m, "15m")
+                ctx.price_zone = pd_zone.get_current_zone(pd_zone.analyze(sw_15m))
+            else:
+                ctx.price_zone = pd_zone.get_current_zone(pd_zone.analyze(mtf_swings))
+        else:
+            pd_df = pd_zone.analyze(mtf_swings)
+            ctx.price_zone = pd_zone.get_current_zone(pd_df)  # "premium"/"discount"/"equilibrium"
 
     return hook
 
@@ -303,14 +317,36 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
     from core.smc.mitigation_tracker import MitigationTracker
 
     swings = SwingDetector(config.get("fractal_windows"))
-    structure = MarketStructure()
+    structure = MarketStructure(relaxed_bias=config.get("relaxed_structure_bias", False))
     choch = CHoCHDetector()
     liquidity = LiquidityDetector()
-    sweeps = SweepDetector()
-    fvgs = FVGDetector()
     obs = OrderBlockDetector()
-    displacement = DisplacementDetector()
     mitigation = MitigationTracker()
+    # Detectors. Default construction = current live behavior (their built-in defaults
+    # already match smc_rules.yaml EXCEPT displacement break_lookback: code=3, YAML=5).
+    # Opt-in (default OFF → live unchanged): make smc_rules.yaml AUTHORITATIVE so
+    # fvg_min_atr_ratio / sweep window / displacement thresholds become real, tunable
+    # count levers — previously these YAML keys were read by NOTHING (audit finding).
+    # Enabling this also applies YAML break_lookback (3→5, a stricter grade-only
+    # displacement booster), so re-baseline the backtest after flipping it on.
+    if config.get("wire_detector_config", False):
+        _swp = config.get("sweep", {}) or {}
+        _dsp = config.get("displacement", {}) or {}
+        sweeps = SweepDetector(window=int(_swp.get("confirmation_window_candles", 5)))
+        fvgs = FVGDetector(
+            atr_period=int(_dsp.get("atr_period", 14)),
+            size_threshold_atr_pct=float(config.get("fvg_min_atr_ratio", 0.3)),
+        )
+        displacement = DisplacementDetector(
+            body_atr_threshold=float(_dsp.get("min_body_atr_multiplier", 1.2)),
+            body_range_threshold=float(_dsp.get("min_body_to_range_ratio", 0.60)),
+            break_lookback=int(_dsp.get("breakout_lookback_candles", 3)),
+            atr_period=int(_dsp.get("atr_period", 14)),
+        )
+    else:
+        sweeps = SweepDetector()
+        fvgs = FVGDetector()
+        displacement = DisplacementDetector()
     # how recently (in execution-TF bars) a sweep must have fired to count
     recency = int(config.get("trigger_recency_bars", 10))
     # sweep_early lever (default OFF → live unchanged): arm on the PROVISIONAL wick
