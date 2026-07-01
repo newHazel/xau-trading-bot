@@ -131,6 +131,14 @@ VARIANTS.update({
     "crypto_confirm": {**_CRYPTO_PCT, "confirm_gate": True, "confirm_min_body_atr": 0.3},
 })
 
+# --- GOLD (XAUUSD) variants: the live gold baseline is 'freshness' (kill-zone sessions ON,
+# absolute costs) — NOT crypto_pct. Same improvement flags, gold-flavoured. ---
+_FRESHNESS = VARIANTS["freshness"]
+VARIANTS.update({
+    "gold_confirm": {**_FRESHNESS, "confirm_gate": True, "confirm_min_body_atr": 0.4},
+    "gold_trend":   {**_FRESHNESS, "trend_gate": True},
+})
+
 
 def _load(db, sym, tf):
     # Prefer the committed per-coin CSV (data/candles/<SYM>/<tf>.csv) — it ships with
