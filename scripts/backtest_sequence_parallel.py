@@ -156,10 +156,13 @@ VARIANTS.update({
     # SL floor 2×ATR (max raised to 3×ATR so the widened SL still passes) → stop noise from
     # wicking a too-tight structural SL (the SL-dominated/low-win% profile). Reuses stop_loss.py.
     "gold_slfloor":   {**_FRESHNESS, "sl_atr_floor_mult": 2.0, "atr_sl_multiplier": 3.0},
-    # STACK the two fixes that target the two KNOWN gold problems: relaxed bias (unblocks the
-    # micro-CHoCH bottleneck, 27% retention) + real rejection confirmation (entry quality).
-    "gold_best":      {**_FRESHNESS, "relaxed_structure_bias": True,
-                       "confirm_gate": True, "confirm_min_body_atr": 0.4},
+    # STACK on the PROVEN-BEST lever: price_zone_on_15m (the 2026-07-01 A/B winner —
+    # PF 1.23, +OOS, fixed the short bleed) + the two entry-quality levers (real rejection
+    # confirmation + OTE-deeper fill). relaxed_structure_bias was dropped: it came back a
+    # no-op on real gold data (the one-sided-swing case it targets is rare).
+    "gold_best":      {**_FRESHNESS, "price_zone_on_15m": True,
+                       "confirm_gate": True, "confirm_min_body_atr": 0.4,
+                       "entry_depth_pct": 0.62},
 })
 
 

@@ -55,7 +55,7 @@ case "$CMD" in
   bt)
     $PY -u scripts/backtest_sequence_parallel.py --symbol XAUUSD --execution-tf 15m \
       --total-bars "${TOTAL_BARS:-11000}" --chunk-bars 1500 --jobs "$JOBS" \
-      --variants "${VARIANTS:-freshness,gold_relaxbias,gold_zone15m,gold_wire02}" \
+      --variants "${VARIANTS:-freshness,gold_zone15m,gold_confirm,gold_ote,gold_slfloor,gold_best}" \
       --db-path "$DB" --out-dir /workspace/xau_bt/bt_checkpoints/XAUUSD_15m \
       --oos-ratio 0.30 --bootstrap --min-trades 30 --min-oos-trades 10 \
       --baseline freshness --export
