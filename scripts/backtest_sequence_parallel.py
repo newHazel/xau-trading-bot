@@ -129,6 +129,10 @@ VARIANTS.update({
     # (>= 0.3x ATR) that closed back THROUGH the proximal FVG edge (reclaimed the level).
     # Stops the bot firing into bounces/breakouts that never rejected (the ETH 11:50 loser).
     "crypto_confirm": {**_CRYPTO_PCT, "confirm_gate": True, "confirm_min_body_atr": 0.3},
+    # OTE deeper-entry lever — the 2026-07-01 gold breakthrough (win 23%->50%, PF 1.82).
+    # Test it on crypto, where 9 coins x 3.9mo gives FAR more trades to actually PROVE it
+    # (gold at 15 fills is unprovable). Enter toward the 0.62-0.79 golden pocket.
+    "crypto_ote":     {**_CRYPTO_PCT, "entry_depth_pct": 0.62},
 })
 
 # --- GOLD (XAUUSD) variants: the live gold baseline is 'freshness' (kill-zone sessions ON,
@@ -156,13 +160,10 @@ VARIANTS.update({
     # SL floor 2×ATR (max raised to 3×ATR so the widened SL still passes) → stop noise from
     # wicking a too-tight structural SL (the SL-dominated/low-win% profile). Reuses stop_loss.py.
     "gold_slfloor":   {**_FRESHNESS, "sl_atr_floor_mult": 2.0, "atr_sl_multiplier": 3.0},
-    # STACK on the PROVEN-BEST lever: price_zone_on_15m (the 2026-07-01 A/B winner —
-    # PF 1.23, +OOS, fixed the short bleed) + the two entry-quality levers (real rejection
-    # confirmation + OTE-deeper fill). relaxed_structure_bias was dropped: it came back a
-    # no-op on real gold data (the one-sided-swing case it targets is rare).
-    "gold_best":      {**_FRESHNESS, "price_zone_on_15m": True,
-                       "confirm_gate": True, "confirm_min_body_atr": 0.4,
-                       "entry_depth_pct": 0.62},
+    # STACK the two A/B WINNERS: OTE deeper entry (win 50%, PF 1.82, P26% — the strongest
+    # single result) + price_zone_on_15m (PF 1.23, fixed the short bleed). confirm_gate was
+    # DROPPED: it crushed count to 5 signals (too strict for gold) and masked the others.
+    "gold_best":      {**_FRESHNESS, "price_zone_on_15m": True, "entry_depth_pct": 0.62},
 })
 
 
