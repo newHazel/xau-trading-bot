@@ -124,6 +124,11 @@ VARIANTS.update({
     # Targets the ETH 11:50 case — a tight SL wicked by a bounce, then price went the trade's
     # way. Trade-off: wider SL lowers R:R → fewer pass the rr gate. The ablation decides.
     "crypto_slfloor": {**_CRYPTO_PCT, "sl_atr_floor_mult": 2.0, "atr_sl_multiplier": 3.0},
+    # REAL confirmation gate (the entry-quality root fix, "Layer 4"): replace the weak
+    # green/red body-color confirmation with a genuine REJECTION candle — decisive body
+    # (>= 0.3x ATR) that closed back THROUGH the proximal FVG edge (reclaimed the level).
+    # Stops the bot firing into bounces/breakouts that never rejected (the ETH 11:50 loser).
+    "crypto_confirm": {**_CRYPTO_PCT, "confirm_gate": True, "confirm_min_body_atr": 0.3},
 })
 
 

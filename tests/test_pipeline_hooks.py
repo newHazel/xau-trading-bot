@@ -143,3 +143,41 @@ class TestComputeEmaBias:
     def test_insufficient_bars_neutral(self):
         from core.engine.pipeline_hooks import compute_ema_bias
         assert compute_ema_bias(self._df([100.0 + i for i in range(150)])) == "neutral"
+
+
+class TestRejectionConfirms:
+    """rejection_confirms: the REAL confirmation gate (Layer 4) — a decisive rejection
+    candle that reclaims the proximal FVG edge, vs the weak body-color default."""
+
+    def _fn(self):
+        from core.engine.pipeline_hooks import rejection_confirms
+        return rejection_confirms
+
+    # FVG lo=100 hi=102 ; atr=2 k=0.3 -> min body 0.6
+    def test_long_valid_rejection(self):
+        # bullish, decisive body, dipped into zone (low<=hi), closed back above hi
+        assert self._fn()(101.0, 103.5, 99.5, 103.0, 100.0, 102.0, True, 2.0) is True
+
+    def test_long_weak_body_rejected(self):
+        # would reclaim, but body 0.3 < 0.6*atr
+        assert self._fn()(102.0, 102.5, 99.5, 102.3, 100.0, 102.0, True, 2.0) is False
+
+    def test_long_no_reclaim_rejected(self):
+        # decisive + dipped, but CLOSED inside the gap (below hi) — not reclaimed
+        assert self._fn()(100.0, 101.8, 99.5, 101.5, 100.0, 102.0, True, 2.0) is False
+
+    def test_long_breakout_no_zone_touch_rejected(self):
+        # never dipped to the zone (low > hi) — a breakout, not a rejection
+        assert self._fn()(103.0, 105.5, 102.5, 105.0, 100.0, 102.0, True, 2.0) is False
+
+    def test_short_valid_rejection(self):
+        # bearish, decisive, wicked up into zone (high>=lo), closed back below lo
+        assert self._fn()(101.0, 102.5, 98.5, 99.0, 100.0, 102.0, False, 2.0) is True
+
+    def test_short_bounce_continuation_rejected(self):
+        # the ETH 11:50 pattern: bearish body but CLOSED above the proximal edge (in the gap)
+        assert self._fn()(102.0, 102.5, 100.2, 100.5, 100.0, 102.0, False, 2.0) is False
+
+    def test_atr_zero_falls_back_to_any_body(self):
+        # atr<=0 → strength = body>0; still needs the reject geometry
+        assert self._fn()(101.0, 103.5, 99.5, 103.0, 100.0, 102.0, True, 0.0) is True

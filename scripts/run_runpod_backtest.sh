@@ -64,9 +64,11 @@ SYMBOLS="${SYMBOLS:-ETHUSDT DOGEUSDT SOLUSDT LINKUSDT AVAXUSDT NEARUSDT SUIUSDT 
 #   crypto_mom     +momentum gate (no falling-knife)        crypto_sweep   +sweep-early
 #   crypto_funding +funding gate (orthogonal, crowded side) crypto_trend   +EMA200 trend gate (no counter-trend)
 #   crypto_slfloor +wider SL band (floor 2x / max 3x ATR — fixes the noise-tight-stop case)
-# Default = the latest improvement test (trend + SL band). Override for others, e.g.
-#   VARIANTS=crypto_pct,crypto_funding   or   VARIANTS=crypto_pct,crypto_mom,crypto_sweep,crypto_funding,crypto_trend,crypto_slfloor
-VARIANTS="${VARIANTS:-crypto_pct,crypto_trend,crypto_slfloor}"
+#   crypto_confirm +REAL confirmation gate (rejection candle >= 0.3x ATR that reclaims the POI —
+#                  the entry-quality root fix; replaces the weak green/red body-color confirm)
+# Default = the highest-value test: baseline vs the real confirmation gate (+ trend).
+#   VARIANTS=crypto_pct,crypto_funding  or  ...,crypto_mom,crypto_sweep,crypto_funding,crypto_trend,crypto_slfloor,crypto_confirm
+VARIANTS="${VARIANTS:-crypto_pct,crypto_confirm,crypto_trend}"
 TOTAL_BARS="${TOTAL_BARS:-31000}"    # full committed window (~3.7 months of 5m bars)
 CHUNK_BARS="${CHUNK_BARS:-$(( TOTAL_BARS / JOBS ))}"; [ "${CHUNK_BARS}" -lt 1500 ] 2>/dev/null && CHUNK_BARS=1500
 START="${START:-2026-03-01}"

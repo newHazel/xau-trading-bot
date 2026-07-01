@@ -129,6 +129,23 @@ def compute_ema_bias(df: pd.DataFrame, fast: int = 50, slow: int = 200) -> str:
     return "neutral"
 
 
+def rejection_confirms(o: float, h: float, l: float, c: float,
+                       fvg_lo: float, fvg_hi: float, is_long: bool,
+                       atr: float, min_body_atr: float = 0.3) -> bool:
+    """A REAL confirmation candle: a decisive REJECTION at the POI (vs the weak body-color
+    gate). LONG: the candle dipped to the proximal FVG edge (fvg_hi) and CLOSED back ABOVE
+    it, with a body >= min_body_atr*ATR. SHORT mirror: wicked up to fvg_lo, closed BELOW it.
+    A bounce/breakout that closes on the wrong side of the proximal edge does NOT confirm
+    (the ETH 11:50 short: its fill candle closed ABOVE the entry → not a rejection)."""
+    body = abs(c - o)
+    strong = (body >= min_body_atr * atr) if atr > 0 else (body > 0)
+    if is_long:
+        reject = (c > o) and (l <= fvg_hi) and (c >= fvg_hi)
+    else:
+        reject = (c < o) and (h >= fvg_lo) and (c <= fvg_lo)
+    return bool(strong and reject)
+
+
 def _collect_levels(liq_df: pd.DataFrame, swing_df: pd.DataFrame, smc_dir: str) -> list:
     """Build a [{price, type}] list of liquidity pools for the TP-target finder.
 
@@ -420,7 +437,19 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
 
             o = float(df["open"].iloc[-1])
             c = float(df["close"].iloc[-1])
-            ctx.confirmation_candle = (c > o) if is_long else (c < o)
+            # confirmation: DEFAULT = body color (green=long / red=short — the known-weak gate).
+            # With confirm_gate ON (default OFF → live unchanged): require a real REJECTION
+            # candle at the POI — a decisive body (>= k*ATR) that closed back THROUGH the
+            # proximal FVG edge (reclaimed the level). Targets the entry-quality root cause:
+            # a weak green/red 'confirmation' let the bot sell into a bounce that never rejected
+            # (the ETH 11:50 short: the fill candle CLOSED above the entry → would be blocked here).
+            if config.get("confirm_gate", False):
+                ctx.confirmation_candle = rejection_confirms(
+                    o, float(df["high"].iloc[-1]), float(df["low"].iloc[-1]), c,
+                    lo, hi, is_long, compute_atr(df),
+                    float(config.get("confirm_min_body_atr", 0.3)))
+            else:
+                ctx.confirmation_candle = (c > o) if is_long else (c < o)
 
         # --- order block (needs FVG/BOS columns) ---
         ob_df = obs.detect(fvg_df)
