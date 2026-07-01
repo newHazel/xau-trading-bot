@@ -149,6 +149,17 @@ VARIANTS.update({
     #     AND loosen the FVG size gate 0.3→0.2 to raise count. NB: also flips displacement
     #     break_lookback 3→5 (grade-only). A real count lever now that config is wired.
     "gold_wire02":    {**_FRESHNESS, "wire_detector_config": True, "fvg_min_atr_ratio": 0.2},
+    # --- Tier 1 win%-targeted levers (default OFF; the pattern review + funnel pointed here) ---
+    # OTE-style deeper entry: fill toward the ICT 0.62-0.79 golden pocket instead of the
+    # FVG proximal edge → better price/R:R, fewer fills. Targets the low-win% root, not count.
+    "gold_ote":       {**_FRESHNESS, "entry_depth_pct": 0.62},
+    # SL floor 2×ATR (max raised to 3×ATR so the widened SL still passes) → stop noise from
+    # wicking a too-tight structural SL (the SL-dominated/low-win% profile). Reuses stop_loss.py.
+    "gold_slfloor":   {**_FRESHNESS, "sl_atr_floor_mult": 2.0, "atr_sl_multiplier": 3.0},
+    # STACK the two fixes that target the two KNOWN gold problems: relaxed bias (unblocks the
+    # micro-CHoCH bottleneck, 27% retention) + real rejection confirmation (entry quality).
+    "gold_best":      {**_FRESHNESS, "relaxed_structure_bias": True,
+                       "confirm_gate": True, "confirm_min_body_atr": 0.4},
 })
 
 

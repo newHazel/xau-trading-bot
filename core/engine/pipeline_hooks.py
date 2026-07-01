@@ -734,8 +734,15 @@ def make_risk_hook(config: Optional[Dict[str, Any]] = None,
         is_long = ctx.direction == "long"
         fvg_bottom = min(ctx.fvg["top"], ctx.fvg["bottom"])
         fvg_top = max(ctx.fvg["top"], ctx.fvg["bottom"])
-        # FVG proximal-edge entry: price retraces to the near edge of the gap.
-        entry = fvg_top if is_long else fvg_bottom
+        # Entry into the FVG. DEFAULT (entry_depth_pct=0.0) = the proximal near edge
+        # (current live behavior). Opt-in (backtest-gated, default OFF → live unchanged):
+        # enter DEEPER toward the distal edge — an OTE-style deeper discount/premium fill
+        # (closer to the ICT 0.62-0.79 "golden pocket"). A deeper entry gives a better
+        # price → better R:R and potentially higher win%, at the cost of needing a deeper
+        # retrace to fill (fewer fills). Clamp to [0, 0.95] so entry stays inside the gap.
+        depth = max(0.0, min(0.95, float(config.get("entry_depth_pct", 0.0))))
+        gap = fvg_top - fvg_bottom
+        entry = (fvg_top - depth * gap) if is_long else (fvg_bottom + depth * gap)
 
         sweep_level = ctx.sweep.get("level") if isinstance(ctx.sweep, dict) else None
         sl_res = sl_calc.calculate(
