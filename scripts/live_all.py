@@ -30,10 +30,11 @@ from datetime import datetime, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = sys.executable
 
-# Same invocations the bots already use (gold matches the old Dockerfile CMD:
-# live_alerts.py defaults = XAUUSD / 5m / interval 300).
+# Gold now runs on 15m (the audit/A/B showed 15m is far less noisy than 5m for gold,
+# and the promoted OTE + zone-on-15m levers were tuned on 15m). --interval 900 evaluates
+# once per closed 15m candle (:00/:15/:30/:45), aligning alerts + heartbeat to the bar.
 BOTS = [
-    ("gold", [PY, "-u", "scripts/live_alerts.py"]),
+    ("gold", [PY, "-u", "scripts/live_alerts.py", "--execution-tf", "15m", "--interval", "900"]),
     ("crypto", [PY, "-u", "scripts/live_alerts_crypto.py"]),
 ]
 

@@ -1,3 +1,13 @@
+# ── LIVE forward-test levers (2026-07-01 indicator audit + gold A/B) ──────────
+# Promoted to live gold after A/B testing showed a coherent, win%-improving
+# mechanism (deeper OTE entry cut SL-bleed and roughly doubled win% vs the
+# proximal-edge fill; zone-on-15m fixed the short bleed vs the coarse 1H zone).
+# NOT statistically proven — the gold sample is small (~10-15 fills) and the exact
+# best depth is window-unstable. This is a FORWARD-TEST on alerts-only (no money
+# at risk — you review the alerts). TO DISABLE: entry_depth_pct 0.0, price_zone_on_15m false.
+entry_depth_pct: 0.70          # OTE-style deeper FVG entry toward the 0.62-0.79 golden pocket
+price_zone_on_15m: true        # premium/discount zone computed on the 15m execution range
+# ──────────────────────────────────────────────────────────────────────────────
 fvg_min_atr_ratio: 0.3
 eqh_eql_tolerance_atr_ratio: 0.15
 sweep_requires_close_back_inside: true
