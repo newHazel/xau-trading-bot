@@ -156,7 +156,12 @@ VARIANTS.update({
     # --- Tier 1 win%-targeted levers (default OFF; the pattern review + funnel pointed here) ---
     # OTE-style deeper entry: fill toward the ICT 0.62-0.79 golden pocket instead of the
     # FVG proximal edge → better price/R:R, fewer fills. Targets the low-win% root, not count.
+    # DEPTH SWEEP (find the best entry depth before promoting to live): deeper = higher win%
+    # but fewer fills (needs a deeper retrace). 0.62 won the first A/B (win 50%, PF 1.82).
+    "gold_ote50":     {**_FRESHNESS, "entry_depth_pct": 0.50},
     "gold_ote":       {**_FRESHNESS, "entry_depth_pct": 0.62},
+    "gold_ote70":     {**_FRESHNESS, "entry_depth_pct": 0.70},
+    "gold_ote79":     {**_FRESHNESS, "entry_depth_pct": 0.79},
     # SL floor 2×ATR (max raised to 3×ATR so the widened SL still passes) → stop noise from
     # wicking a too-tight structural SL (the SL-dominated/low-win% profile). Reuses stop_loss.py.
     "gold_slfloor":   {**_FRESHNESS, "sl_atr_floor_mult": 2.0, "atr_sl_multiplier": 3.0},
