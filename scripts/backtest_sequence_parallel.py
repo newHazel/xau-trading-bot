@@ -169,6 +169,20 @@ VARIANTS.update({
     # single result) + price_zone_on_15m (PF 1.23, fixed the short bleed). confirm_gate was
     # DROPPED: it crushed count to 5 signals (too strict for gold) and masked the others.
     "gold_best":      {**_FRESHNESS, "price_zone_on_15m": True, "entry_depth_pct": 0.62},
+    # --- SK-System entry grid (Stefan Kassing 'Korrekturlevel' 0.50/0.559/0.618/0.667) ---
+    # The CHEAPEST SK lever: reuse the OTE FVG-depth mechanism but resolve the depth from
+    # the SK retracement grid instead of a single number. Head-to-head vs gold_ote70 (the
+    # current live 0.70 OTE) answers: do SK's exact levels beat a tuned single depth?
+    # NB: SK anchors on the swing 0→A leg; this approximates it on the FVG (the "bridge").
+    # The true swing-anchored version is a separate future lever (sk_fib_anchor).
+    "gold_sk":         {**_FRESHNESS, "sk_entry_grid": True},                                    # mean ~0.586
+    "gold_sk_golden":  {**_FRESHNESS, "sk_entry_grid": True, "sk_entry_grid_mode": "golden"},    # 0.618
+    "gold_sk_deep":    {**_FRESHNESS, "sk_entry_grid": True, "sk_entry_grid_mode": "deep"},      # 0.667
+    "gold_sk_shallow": {**_FRESHNESS, "sk_entry_grid": True, "sk_entry_grid_mode": "shallow"},   # 0.50
+    # stack the SK grid on the zone15m winner (the two mechanisms are orthogonal)
+    "gold_sk_best":    {**_FRESHNESS, "price_zone_on_15m": True, "sk_entry_grid": True},
+    # crypto PROOF path: 9 coins × ~4mo = enough trades to actually PROVE it (gold is data-capped)
+    "crypto_sk":       {**_CRYPTO_PCT, "sk_entry_grid": True},
 })
 
 

@@ -705,6 +705,49 @@ def make_indicator_hook(config: Optional[Dict[str, Any]] = None,
 # STAGE 5 — risk (SL → liquidity target → TP → position size)             #
 # ====================================================================== #
 
+def _sk_grid_depth(config: Dict[str, Any]) -> Optional[float]:
+    """SK-System entry grid (Stefan Kassing 'Korrekturlevel').
+
+    Flag-gated (``sk_entry_grid``), default OFF → live unchanged. When ON, the FVG
+    entry depth is resolved from the SK retracement grid ``[0.50, 0.559, 0.618, 0.667]``
+    (0.559 and 0.667 are the non-standard SK levels; 0.50/0.618 = the "golden pocket")
+    INSTEAD of the single ``entry_depth_pct``. This is the "bridge" between SK's deep
+    retrace entry and the bot's existing OTE lever — same FVG-depth mechanism, SK's
+    exact levels. (SK proper anchors on the swing 0→A leg; anchoring on the FVG here is
+    the cheap approximation. The true swing-anchored version is a future ``sk_fib_anchor``
+    lever.) Because the pipeline emits ONE entry per signal, ``sk_entry_grid_mode``
+    collapses the grid to a single depth:
+
+        "mean"    -> laddered average across the pocket (default; most SK-faithful to
+                     "place limit orders at every level")
+        "golden"  -> the grid level nearest 0.618 (golden pocket)
+        "shallow" -> shallowest level (most fills, worst price)
+        "deep"    -> deepest level (best price, fewest fills)
+        <float>   -> use that exact depth
+
+    Returns the clamped ``[0, 0.95]`` depth, or ``None`` when the lever is OFF (the
+    caller then falls back to ``entry_depth_pct``).
+    """
+    if not config.get("sk_entry_grid", False):
+        return None
+    levels = config.get("sk_entry_grid_levels") or [0.50, 0.559, 0.618, 0.667]
+    levels = sorted(float(x) for x in levels)
+    mode = config.get("sk_entry_grid_mode", "mean")
+    if isinstance(mode, bool):                       # guard: bool is a subclass of int
+        mode = "mean"
+    if isinstance(mode, (int, float)):
+        depth = float(mode)
+    elif mode == "golden":
+        depth = min(levels, key=lambda x: abs(x - 0.618))
+    elif mode == "shallow":
+        depth = levels[0]
+    elif mode == "deep":
+        depth = levels[-1]
+    else:                                            # "mean" (default) and any unknown
+        depth = sum(levels) / len(levels)
+    return max(0.0, min(0.95, depth))
+
+
 def make_risk_hook(config: Optional[Dict[str, Any]] = None,
                    account_balance: float = 10000.0,
                    execution_tf: str = "5m") -> StageHook:
@@ -740,7 +783,12 @@ def make_risk_hook(config: Optional[Dict[str, Any]] = None,
         # (closer to the ICT 0.62-0.79 "golden pocket"). A deeper entry gives a better
         # price → better R:R and potentially higher win%, at the cost of needing a deeper
         # retrace to fill (fewer fills). Clamp to [0, 0.95] so entry stays inside the gap.
-        depth = max(0.0, min(0.95, float(config.get("entry_depth_pct", 0.0))))
+        # SK-System entry grid (Stefan Kassing) OVERRIDES the single OTE depth when the
+        # sk_entry_grid lever is on (flag-gated, default OFF → live unchanged). See
+        # _sk_grid_depth. Falls back to entry_depth_pct (the existing OTE lever) otherwise.
+        sk_depth = _sk_grid_depth(config)
+        depth = sk_depth if sk_depth is not None \
+            else max(0.0, min(0.95, float(config.get("entry_depth_pct", 0.0))))
         gap = fvg_top - fvg_bottom
         entry = (fvg_top - depth * gap) if is_long else (fvg_bottom + depth * gap)
 

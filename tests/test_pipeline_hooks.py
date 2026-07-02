@@ -103,6 +103,75 @@ class TestRiskHookNetRR:
             assert ctx.net_rr < ctx.extra["gross_rr"]   # costs strictly subtracted
 
 
+class TestSKEntryGrid:
+    """SK-System entry grid (Stefan Kassing) — flag-gated FVG-depth resolver, default OFF.
+    Grid [0.50, 0.559, 0.618, 0.667]; sk_entry_grid_mode collapses it to one entry depth."""
+
+    def test_off_returns_none(self):
+        from core.engine.pipeline_hooks import _sk_grid_depth
+        assert _sk_grid_depth({}) is None
+        assert _sk_grid_depth({"sk_entry_grid": False}) is None
+
+    def test_mean_is_grid_average(self):
+        from core.engine.pipeline_hooks import _sk_grid_depth
+        d = _sk_grid_depth({"sk_entry_grid": True})
+        assert d == pytest.approx((0.50 + 0.559 + 0.618 + 0.667) / 4)
+
+    def test_golden_picks_0618(self):
+        from core.engine.pipeline_hooks import _sk_grid_depth
+        assert _sk_grid_depth({"sk_entry_grid": True,
+                               "sk_entry_grid_mode": "golden"}) == pytest.approx(0.618)
+
+    def test_deep_and_shallow(self):
+        from core.engine.pipeline_hooks import _sk_grid_depth
+        assert _sk_grid_depth({"sk_entry_grid": True,
+                               "sk_entry_grid_mode": "deep"}) == pytest.approx(0.667)
+        assert _sk_grid_depth({"sk_entry_grid": True,
+                               "sk_entry_grid_mode": "shallow"}) == pytest.approx(0.50)
+
+    def test_float_mode_is_exact_depth(self):
+        from core.engine.pipeline_hooks import _sk_grid_depth
+        assert _sk_grid_depth({"sk_entry_grid": True,
+                               "sk_entry_grid_mode": 0.72}) == pytest.approx(0.72)
+
+    def test_custom_levels(self):
+        from core.engine.pipeline_hooks import _sk_grid_depth
+        assert _sk_grid_depth({"sk_entry_grid": True,
+                               "sk_entry_grid_levels": [0.4, 0.6]}) == pytest.approx(0.5)
+
+    def test_clamped_to_max(self):
+        from core.engine.pipeline_hooks import _sk_grid_depth
+        assert _sk_grid_depth({"sk_entry_grid": True,
+                               "sk_entry_grid_mode": 5.0}) == pytest.approx(0.95)
+
+    def test_grid_ignores_entry_depth_pct(self):
+        # When both are set the SK grid WINS — entry_depth_pct is not consulted.
+        from core.engine.pipeline_hooks import _sk_grid_depth
+        d = _sk_grid_depth({"sk_entry_grid": True, "sk_entry_grid_mode": "deep",
+                            "entry_depth_pct": 0.70})
+        assert d == pytest.approx(0.667)
+
+    def test_grid_overrides_entry_depth_pct_in_risk_hook(self):
+        # entry_depth_pct=0.70 would enter at 0.70 of the gap; the SK grid (deep=0.667)
+        # must override → entry lands at 0.667 of the FVG gap instead.
+        from core.engine.pipeline_hooks import make_risk_hook
+        idx = pd.date_range("2026-06-11", periods=40, freq="5min", tz="UTC")
+        df = pd.DataFrame({"open": [4000.0] * 40, "high": [4004.0] * 40,
+                           "low": [3996.0] * 40, "close": [4000.0] * 40,
+                           "volume": [100] * 40}, index=idx)
+        ctx = _ctx()
+        ctx.direction = "long"
+        ctx.sweep = {"level": 3985.0}
+        ctx.fvg = {"top": 4000.0, "bottom": 3990.0}   # gap = 10
+        ctx.news_clear = True
+        cfg = {**CFG, "entry_depth_pct": 0.70,
+               "sk_entry_grid": True, "sk_entry_grid_mode": "deep"}
+        make_risk_hook(cfg)(ctx, {"timestamp": NOW}, {"5m": df})
+        if ctx.entry is not None:                     # a trade was sized
+            # long entry = fvg_top - depth*gap = 4000 - 0.667*10 = 3993.33
+            assert ctx.entry == pytest.approx(4000.0 - 0.667 * 10.0, abs=1e-6)
+
+
 class TestComputeRSI:
     """RSI powers the momentum-confirmation gate: high when rising, low when falling."""
 
