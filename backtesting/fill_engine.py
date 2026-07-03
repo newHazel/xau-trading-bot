@@ -120,6 +120,24 @@ class FillEngine:
 
         return results
 
+    def check_entry_bar_fills(
+        self,
+        position: OpenPosition,
+        bar_high: float,
+        bar_low: float,
+        bar_index: int,
+    ) -> List[FillResult]:
+        """Fills on the position's OWN entry bar. A retrace-limit fill means price was
+        already traveling toward the stop, so a same-bar SL sweep is real and must be
+        booked (the falling-knife case). A same-bar TP print is ambiguous — it may have
+        happened BEFORE the limit filled — so the conservative engine never grants it."""
+        results: List[FillResult] = []
+        if not position.is_open:
+            return results
+        if self._sl_touched(position, bar_high, bar_low):
+            results.append(self._create_sl_fill(position, bar_index))
+        return results
+
     def _check_intrabar(
         self, position: OpenPosition, candles: List[Dict[str, float]], bar_index: int,
     ) -> List[FillResult]:

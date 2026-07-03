@@ -41,6 +41,7 @@ import pandas as pd
 from core.logging.db import get_db
 from core.engine.signal_pipeline import PipelineContext
 from core.engine.sequence_runner import SequenceRunner, _SEQUENCE
+from core.utils.visibility import visible_window
 from core.engine.state_machine import State
 
 # Fallback if the YAML config/ dir can't be loaded. The REAL run uses
@@ -142,7 +143,9 @@ def main():
     t0 = time.time()
     for i, pos in enumerate(positions):
         cutoff = idx[pos]
-        hist = {tf: df[df.index <= cutoff].tail(a.window) for tf, df in full.items() if not df.empty}
+        # close-time visibility: exclude the still-forming HTF bar (look-ahead fix)
+        hist = {tf: visible_window(df, cutoff, a.window, tf, a.execution_tf)
+                for tf, df in full.items() if not df.empty}
         bar = {"timestamp": cutoff.to_pydatetime(), "bar_index": pos, "symbol": a.symbol}
 
         sig = runner.on_bar(bar, hist)

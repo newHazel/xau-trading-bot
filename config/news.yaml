@@ -21,3 +21,8 @@ fallback:
   manual_csv_path: "data/calendar/manual_news.csv"
   if_no_news_data: "degraded_mode"
   degraded_mode_max_grade: "B"
+  # Staleness guard: if the newest loaded event is older than this many days, the
+  # calendar has no forward visibility. In LIVE (LiveAlertEngine injects
+  # stale_fail_closed=true) this BLOCKS alerts until the CSV is refreshed
+  # (scripts/update_news_calendar.py); backtests are unaffected.
+  stale_after_days: 5

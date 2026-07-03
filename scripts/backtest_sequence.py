@@ -34,6 +34,7 @@ import pandas as pd
 from core.logging.db import get_db
 from core.engine.sequence_runner import SequenceRunner
 from core.engine.pipeline_config import assemble_pipeline_config
+from core.utils.visibility import visible_window
 from backtesting.backtest_runner import BacktestRunner, BacktestConfig
 from backtesting.metrics import compute_metrics
 
@@ -62,10 +63,11 @@ def _load(db, sym, tf):
     return df.set_index("timestamp").sort_index()
 
 
-def _win(df, ts, w):
-    """Fast rolling window: last `w` bars with index <= ts (searchsorted, O(log n))."""
-    pos = df.index.searchsorted(ts, side="right")
-    return df.iloc[max(0, pos - w):pos]
+def _win(df, ts, w, tf, exec_tf):
+    """Fast rolling window: last `w` bars of `tf` fully CLOSED by the time the exec bar
+    at `ts` closes. The old plain index<=ts slice leaked the still-forming HTF bar —
+    up to ~4h of future price inside htf_bias (look-ahead)."""
+    return visible_window(df, ts, w, tf, exec_tf)
 
 
 def _zone(f):
@@ -86,7 +88,7 @@ def run_mode(enabled, full, exec_df, a):
 
     for local_pos, gpos in enumerate(range(start, len(exec_df))):
         ts = exec_df.index[gpos]
-        hist = {tf: _win(df, ts, a.window) for tf, df in full.items() if not df.empty}
+        hist = {tf: _win(df, ts, a.window, tf, a.execution_tf) for tf, df in full.items() if not df.empty}
         bar = {"timestamp": ts.to_pydatetime(), "bar_index": local_pos, "symbol": a.symbol}
         sig = runner.on_bar(bar, hist)
 

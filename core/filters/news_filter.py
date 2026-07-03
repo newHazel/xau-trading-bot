@@ -79,6 +79,14 @@ class NewsFilter:
         self._tiers = NewsTiers(config)
         self._fallback_cfg = config.get("fallback", {})
         self._degraded_max_grade = self._fallback_cfg.get("degraded_mode_max_grade", "B")
+        # Staleness guard: a calendar whose newest event is > stale_after_days in the
+        # past has ZERO forward visibility — any upcoming FOMC/NFP is invisible, so
+        # news_clear would silently pass straight through a blackout. fail_closed is
+        # injected by the LIVE engine only (default False): historical backtests
+        # legitimately evaluate bars far past the newest loaded event.
+        self._stale_after_days = float(self._fallback_cfg.get("stale_after_days", 5))
+        self._stale_fail_closed = bool(self._fallback_cfg.get("stale_fail_closed", False))
+        self._stale_warned = False
         self._events: List[NewsEvent] = []
         self._data_loaded = False
         # Whether we've ALREADY tried to auto-load (via ensure_loaded). A failed load
@@ -152,6 +160,31 @@ class NewsFilter:
                 block_reason=None,
                 max_grade=None,
             )
+
+        # Fail closed on a STALE calendar (live only): events loaded, but the newest one
+        # is so far in the past that we have no forward visibility — the manual CSV was
+        # not updated and an upcoming FOMC/NFP would sail straight through news_clear.
+        if self._stale_fail_closed:
+            newest = max(e.event_time for e in self._events)
+            stale_minutes = (dt - newest).total_seconds() / 60
+            if stale_minutes > self._stale_after_days * 1440:
+                if not self._stale_warned:
+                    self._stale_warned = True
+                    logger.warning(
+                        "[NewsFilter] calendar STALE — newest event %s is %.0f days old; "
+                        "BLOCKING alerts until data/calendar/manual_news.csv is updated "
+                        "(run scripts/update_news_calendar.py)",
+                        newest.isoformat(), stale_minutes / 1440,
+                    )
+                return NewsResult(
+                    status=NewsStatus.BLOCKED,
+                    nearest_event=None,
+                    nearest_tier=None,
+                    minutes_to_nearest=None,
+                    block_reason=(f"news calendar stale — newest event {newest:%Y-%m-%d}, "
+                                  f"update manual_news.csv"),
+                    max_grade=None,
+                )
 
         nearest_event: Optional[NewsEvent] = None
         nearest_abs_minutes: Optional[float] = None

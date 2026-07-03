@@ -88,7 +88,10 @@ echo "  coins:  ${SYMBOLS}"
 echo "=================================================================="
 
 for SYM in ${SYMBOLS}; do
-  OUT_DIR="${OUT_ROOT}/${SYM}"; mkdir -p "$OUT_DIR"   # per-coin: checkpoints key on variant+start, NOT symbol
+  OUT_DIR="${OUT_ROOT}/${SYM}"; mkdir -p "$OUT_DIR"   # per-coin dirs (tidy; the key now covers symbol too)
+  # NOTE: checkpoints are now keyed (variant, start, END, config-hash incl. symbol/tf/
+  # schema) — old-format sig_*.json files are ignored, so the first run after the
+  # look-ahead fix (schema v2) regenerates everything. Clean old files at will.
   echo; echo ">>>>>>>>>>>>>>>>>>>>>>  ${SYM}  <<<<<<<<<<<<<<<<<<<<<<"
   if [ -z "$AGG" ] && [ -f "data/candles/${SYM}/5m.csv" ]; then
     echo ">>> [data] committed CSVs in data/candles/${SYM}/ (offline, no download)"

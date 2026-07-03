@@ -29,6 +29,7 @@ from core.logging.db import get_db
 from core.engine.rulebook_engine import RulebookEngine
 from core.engine.signal_pipeline import SignalPipeline
 from core.engine.pipeline_hooks import build_default_hooks
+from core.utils.visibility import visible_window
 from backtesting.backtest_runner import BacktestRunner, BacktestConfig
 from backtesting.metrics import compute_metrics
 
@@ -96,7 +97,9 @@ def main():
     t0 = time.time()
     for local_pos, gpos in enumerate(positions):
         cutoff = exec_df.index[gpos]
-        hist = {tf: df[df.index <= cutoff].tail(a.window) for tf, df in full.items() if not df.empty}
+        # close-time visibility: exclude the still-forming HTF bar (look-ahead fix)
+        hist = {tf: visible_window(df, cutoff, a.window, tf, a.execution_tf)
+                for tf, df in full.items() if not df.empty}
         sig = pipe.process_bar({"timestamp": cutoff.to_pydatetime(), "bar_index": local_pos,
                                 "symbol": a.symbol}, hist)
         if sig is not None and sig.approved and sig.grade in TRADEABLE:

@@ -45,6 +45,16 @@ class LiveConfig:
     htf_refresh_minutes: int = 60
 
 
+def _inject_live_news_policy(config: Dict[str, Any]) -> Dict[str, Any]:
+    """LIVE-only: a stale news calendar must FAIL CLOSED (block alerts) — the manual
+    CSV going un-updated otherwise silently disables the mandatory news gate right
+    before FOMC/NFP. Injected here (not news.yaml) because historical backtests
+    legitimately evaluate bars far past the newest loaded event."""
+    news = dict(config.get("news") or {})
+    news["fallback"] = {**(news.get("fallback") or {}), "stale_fail_closed": True}
+    return {**config, "news": news}
+
+
 class LiveAlertEngine:
     def __init__(
         self,
@@ -68,6 +78,8 @@ class LiveAlertEngine:
         # counts in BARS, so convert at the execution TF. Falls back to the runner's validated
         # defaults (8/40 bars) when absent. (Bug #9: these config keys were required but never
         # applied — the runner silently used the hardcoded defaults.)
+        config = _inject_live_news_policy(config)
+
         _sm = config.get("state_machine") or {}
         _tf_min = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240}.get(live.execution_tf, 5)
         _cd_min = _sm.get("cooldown_minutes_after_signal")

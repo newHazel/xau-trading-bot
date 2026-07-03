@@ -175,8 +175,19 @@ class BacktestRunner:
         # a signal whose FVG-edge entry price is never touched must NOT count as a trade.
         if self._pending is not None:
             self._check_pending_entry(bar)
-            if (self._open_position and self._open_position.is_open) or self._pending is not None:
-                return  # just opened on this bar, or still waiting for the entry touch
+            if self._open_position and self._open_position.is_open:
+                # Just opened on THIS bar: the entry bar's own range can still sweep the
+                # stop (falling-knife limit fill). SL-only, never a same-bar TP — a TP
+                # print may predate the limit fill. Skipping this check let a bar that
+                # traversed entry AND stop book no loss (optimistic bias on exactly the
+                # continuation wicks this strategy is most exposed to).
+                for fill in self._fill_engine.check_entry_bar_fills(
+                    self._open_position, bar.high, bar.low, bar.bar_index,
+                ):
+                    self._record_fill(fill, bar)
+                return
+            if self._pending is not None:
+                return  # still waiting for the entry touch
 
         if self._is_gap_cooldown(bar.timestamp):
             return

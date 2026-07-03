@@ -39,6 +39,8 @@ import pandas as pd
 from core.logging.db import get_db
 from core.engine.sequence_runner import SequenceRunner
 from core.engine.pipeline_config import assemble_pipeline_config
+from core.utils.visibility import visible_window
+from core.utils.config_hash import short_hash
 from backtesting.backtest_runner import BacktestRunner, BacktestConfig
 from backtesting.metrics import compute_metrics
 from backtesting.bootstrap import bootstrap_ci, bootstrap_diff, holm_threshold
@@ -206,25 +208,40 @@ def _load(db, sym, tf):
     return df.set_index("timestamp").sort_index()
 
 
-def _win(df, ts, w):
-    pos = df.index.searchsorted(ts, side="right")
-    return df.iloc[max(0, pos - w):pos]
+# Bump when signal-generation semantics change (windowing, hooks, fill preconditions):
+# it feeds the checkpoint key, so old checkpoints auto-invalidate instead of silently
+# feeding stale signals into a report. v2 = close-time HTF visibility (look-ahead fix).
+_CKPT_SCHEMA = 2
+
+
+def _ckpt_key(label, overrides, warmup, window, symbol, exec_tf):
+    """Short content hash for checkpoint filenames: any change to the variant's
+    resolved overrides, the run geometry, or the signal-gen schema produces a new
+    key — stale/mixed-grid checkpoints can no longer be silently aggregated."""
+    return short_hash({
+        "schema": _CKPT_SCHEMA, "label": label, "overrides": overrides,
+        "warmup": warmup, "window": window, "symbol": symbol, "exec_tf": exec_tf,
+    })[:10]
 
 
 def _gen_chunk(task):
     """Worker (top-level for spawn): emit signals for [real_start, real_end) under a
-    config variant, fed a warmup overlap. Checkpoints to disk."""
+    config variant, fed a warmup overlap. Checkpoints to disk.
+    Returns (label, signals, cached)."""
     label, overrides, real_start, real_end, warmup, window, symbol, exec_tf, db_path, out_dir = task
     t0 = time.time()
     # Resume: if this chunk was already generated (e.g. on a persistent volume), reuse
     # it instead of regenerating — signal gen is the slow part, scoring is cheap.
-    ckpt = os.path.join(out_dir, f"sig_{label}_{real_start:08d}.json")
+    # Key includes end + config hash: same start with a longer end, a different chunk
+    # grid, or an edited variant is a cache MISS, not a silent stale hit.
+    key = _ckpt_key(label, overrides, warmup, window, symbol, exec_tf)
+    ckpt = os.path.join(out_dir, f"sig_{label}_{real_start:08d}_{real_end:08d}_{key}.json")
     if os.path.exists(ckpt):
         try:
             with open(ckpt) as f:
                 out = json.load(f)
             print(f"  [{label} {real_start}-{real_end}] {len(out)} signals (cached)", flush=True)
-            return (label, out)
+            return (label, out, True)
         except Exception:
             pass  # corrupt/partial checkpoint → regenerate
     db = get_db(db_path)
@@ -245,7 +262,11 @@ def _gen_chunk(task):
     out = []
     for gpos in range(feed_start, real_end):
         ts = exec_df.index[gpos]
-        hist = {tf: _win(df, ts, window) for tf, df in full.items() if not df.empty}
+        # Close-time visibility: HTF frames exclude their still-forming bar (which
+        # would carry future price into htf_bias); pseudo-frames (funding) keep the
+        # plain index<=ts cut. This matches what live fetchers actually serve.
+        hist = {tf: visible_window(df, ts, window, tf, exec_tf)
+                for tf, df in full.items() if not df.empty}
         bar = {"timestamp": ts.to_pydatetime(), "bar_index": gpos, "symbol": symbol}
         sig = runner.on_bar(bar, hist)
         if sig is not None and gpos >= real_start:
@@ -254,10 +275,10 @@ def _gen_chunk(task):
                         "tp2": sig.tp2 if sig.tp2 is not None else sig.tp1,
                         "grade": sig.grade, "gpos": gpos, "ts": ts.isoformat()})
     os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, f"sig_{label}_{real_start:08d}.json"), "w") as f:
+    with open(ckpt, "w") as f:
         json.dump(out, f)
     print(f"  [{label} {real_start}-{real_end}] {len(out)} signals ({time.time()-t0:.0f}s)", flush=True)
-    return (label, out)
+    return (label, out, False)
 
 
 def _chunks(range_start, n, chunk_bars):
@@ -342,7 +363,10 @@ def _reach_rate(signals, exec_df, range_start, expiry=12):
     for s in signals:
         g = int(s["gpos"]); e = float(s["entry"])
         end = min(nbars, g + expiry + 1)
-        if g < nbars and any(lo[b] <= e <= hi[b] for b in range(g, end)):
+        # Scan starts at g+1: the runner arms the pending entry ON the signal bar and
+        # can only fill from the NEXT bar, so counting the signal bar itself inflated
+        # reach% relative to anything the fill engine could actually enter.
+        if g < nbars and any(lo[b] <= e <= hi[b] for b in range(g + 1, end)):
             reached += 1
     return reached / len(signals), reached, len(signals)
 
@@ -519,7 +543,7 @@ def main():
         tasks = [("all", VARIANTS["all"], cs, ce, a.warmup, a.window, a.symbol,
                   a.execution_tf, a.db_path, a.out_dir + "_v3") for cs, ce in _chunks(rs, n, 100)]
         with Pool(a.jobs) as pool:
-            many = [s for _l, sigs in pool.map(_gen_chunk, tasks) for s in sigs]
+            many = [s for _l, sigs, _c in pool.map(_gen_chunk, tasks) for s in sigs]
         k = lambda s: (s["gpos"], round(s["entry"], 2), s["direction"])
         s1, s3 = sorted(map(k, one)), sorted(map(k, many))
         print(f"\n=== VERIFY ===\n  1 chunk: {len(s1)} signals | 3 chunks: {len(s3)} signals")
@@ -533,18 +557,32 @@ def main():
     _months = max((_span.index[-1] - _span.index[0]).days, 1) / 30.44  # for signals/month
 
     if a.aggregate_only:
+        # Load ONLY checkpoints whose key matches the current args/variant config —
+        # old-schema, edited-variant or different-geometry files are ignored, and a
+        # mixed chunk grid (overlapping ranges) is a hard error instead of silently
+        # double-counting signals in the report.
         by = {v: [] for v in variants}
-        for fn in sorted(os.listdir(a.out_dir)):
-            # filename is sig_<label>_<8-digit-start>.json; the label itself may contain
-            # underscores (e.g. "crypto_pct"), so strip the prefix + numeric suffix
-            # instead of naively splitting on "_".
-            m = re.match(r"^sig_(.+)_(\d{8})\.json$", fn)
-            if not m:
-                continue
-            lbl = m.group(1)
-            if lbl in by:
+        for v in variants:
+            key = _ckpt_key(v, VARIANTS[v], a.warmup, a.window, a.symbol, a.execution_tf)
+            spans = []
+            for fn in sorted(os.listdir(a.out_dir)):
+                m = re.match(rf"^sig_{re.escape(v)}_(\d{{8}})_(\d{{8}})_{key}\.json$", fn)
+                if not m:
+                    continue
                 with open(os.path.join(a.out_dir, fn)) as f:
-                    by[lbl].extend(json.load(f))
+                    by[v].extend(json.load(f))
+                spans.append((int(m.group(1)), int(m.group(2))))
+            spans.sort()
+            for (s1, e1), (s2, e2) in zip(spans, spans[1:]):
+                if s2 < e1:
+                    sys.exit(f"🔴 {v}: overlapping checkpoints [{s1},{e1}) and [{s2},{e2}) in "
+                             f"{a.out_dir} — mixed chunk grids; clean the out-dir and regenerate.")
+            contiguous = all(e1 == s2 for (_s1, e1), (s2, _e2) in zip(spans, spans[1:]))
+            covered = bool(spans) and contiguous and spans[0][0] <= range_start and spans[-1][1] >= n
+            if not covered:
+                print(f"  ⚠️ {v}: checkpoints do NOT fully cover report range [{range_start},{n}) "
+                      f"(found {len(spans)} matching-key chunks) — totals below are PARTIAL")
+            print(f"  [{v}] aggregated {len(spans)} checkpoints, {len(by[v])} signals", flush=True)
     else:
         tasks = []
         for v in variants:
@@ -558,9 +596,11 @@ def main():
         t0 = time.time()
         with Pool(a.jobs) as pool:
             results = pool.map(_gen_chunk, tasks)
-        print(f"\n  all chunks done in {time.time()-t0:.0f}s", flush=True)
+        n_cached = sum(1 for _l, _s, c in results if c)
+        print(f"\n  all chunks done in {time.time()-t0:.0f}s "
+              f"({n_cached} cached / {len(results) - n_cached} generated)", flush=True)
         by = {v: [] for v in variants}
-        for lbl, sigs in results:
+        for lbl, sigs, _c in results:
             by[lbl].extend(sigs)
 
     _report(by, exec_df, range_start, n, a.execution_tf, variants, _span, _months, a)

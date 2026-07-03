@@ -43,6 +43,7 @@ from core.logging.signal_logger import SignalLogger
 from core.engine.signal_pipeline import PipelineContext
 from core.engine.sequence_runner import SequenceRunner
 from core.engine.pipeline_config import assemble_pipeline_config
+from core.utils.visibility import visible_window
 
 # Fallback config if the YAML config/ dir can't be loaded. The REAL run uses
 # assemble_pipeline_config('config') — without it, SessionFilter has no kill-zone
@@ -178,7 +179,9 @@ def main() -> None:
 
     for i, pos in enumerate(positions):
         cutoff = exec_idx[pos]
-        hist = {tf: df[(df.index <= cutoff)].tail(args.window) for tf, df in full.items() if not df.empty}
+        # close-time visibility: exclude the still-forming HTF bar (look-ahead fix)
+        hist = {tf: visible_window(df, cutoff, args.window, tf, args.execution_tf)
+                for tf, df in full.items() if not df.empty}
         bar = {"timestamp": cutoff.to_pydatetime(), "bar_index": pos, "symbol": args.symbol}
 
         sig = runner.on_bar(bar, hist)

@@ -71,6 +71,11 @@ def _parse(rows: list, end_ms: int) -> pd.DataFrame:
         ts_ms = int(row[0])
         if ts_ms >= end_ms:
             continue
+        # Drop the still-FORMING kline by CLOSE time (row[6]): its partial OHLCV would
+        # otherwise be stored permanently — store_candles is INSERT OR IGNORE, so a
+        # later re-fetch never overwrites the frozen wrong bar.
+        if int(row[6]) >= end_ms:
+            continue
         parsed.append({
             "timestamp": pd.Timestamp(ts_ms, unit="ms", tz="UTC"),
             "open": float(row[1]), "high": float(row[2]),
