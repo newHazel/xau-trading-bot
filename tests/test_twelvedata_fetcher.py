@@ -1,6 +1,7 @@
 """Tests for TwelveDataFetcher — mocked HTTP, no live calls, no key needed."""
 
 import pytest
+import pandas as pd
 from datetime import datetime, timezone
 from core.data.twelvedata_fetcher import TwelveDataFetcher, _TF_MAP, _SYMBOL_MAP
 from core.data.data_fetcher import FetcherStatus
@@ -99,10 +100,33 @@ class TestFetchMocked:
         import requests
         monkeypatch.setattr(requests, "get", lambda *a, **k: _FakeResp(_ok_payload()))
         f = TwelveDataFetcher()
-        # end before the 2nd candle → only the 1st remains
-        res = f.fetch_candles("XAUUSD", "1h", START, datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc))
+        # Close-time cut: the 00:00 1h candle CLOSES at 01:00, the 01:00 candle at 02:00.
+        # end=01:00 → only the 1st is fully closed; the 2nd is still forming → dropped.
+        res = f.fetch_candles("XAUUSD", "1h", START, datetime(2026, 1, 1, 1, 0, tzinfo=timezone.utc))
         assert res.status == FetcherStatus.OK
         assert len(res.data) == 1
+        assert res.data.index[-1] == pd.Timestamp("2026-01-01 00:00", tz="UTC")
+
+    def test_forming_bar_by_close_time_not_open_time(self, monkeypatch):
+        """end mid-way through the 1st candle → it has NOT closed → nothing complete.
+        The old open-time cut (index <= end) wrongly KEPT and stored this forming bar."""
+        monkeypatch.setenv("TWELVE_DATA_API_KEY", "k")
+        import requests
+        monkeypatch.setattr(requests, "get", lambda *a, **k: _FakeResp(_ok_payload()))
+        f = TwelveDataFetcher()
+        res = f.fetch_candles("XAUUSD", "1h", START, datetime(2026, 1, 1, 0, 30, tzinfo=timezone.utc))
+        # 00:00 candle closes 01:00 > 00:30 → forming → dropped → empty surfaces as an
+        # ERROR (validate rejects empty), NOT a silently stored partial bar.
+        assert res.status == FetcherStatus.ERROR
+
+    def test_both_candles_kept_when_end_past_second_close(self, monkeypatch):
+        monkeypatch.setenv("TWELVE_DATA_API_KEY", "k")
+        import requests
+        monkeypatch.setattr(requests, "get", lambda *a, **k: _FakeResp(_ok_payload()))
+        f = TwelveDataFetcher()
+        res = f.fetch_candles("XAUUSD", "1h", START, datetime(2026, 1, 1, 2, 0, tzinfo=timezone.utc))
+        assert res.status == FetcherStatus.OK
+        assert len(res.data) == 2
 
 
 class TestIsAvailable:

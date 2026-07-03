@@ -113,8 +113,19 @@ class TwelveDataFetcher(DataFetcher):
                 latency_ms=(time.monotonic() - t0) * 1000,
             )
 
-        # drop any candle at/after `end` (in-progress guard)
-        df = df[df.index <= pd.Timestamp(end).tz_convert("UTC")]
+        # Keep only candles fully CLOSED by `end`. The datetime field is OPEN time, so
+        # `index <= end` kept a bar whose open <= end but close > end — i.e. when a caller
+        # (scripts/fetch_twelvedata_history.py) passes end=now, the still-FORMING bar was
+        # stored, and the backtest DB is INSERT OR IGNORE so a re-fetch never repaired it.
+        # Cut by close time (open + interval <= end), mirroring fetch_latest_candles.
+        bar_td = pd.Timedelta(minutes=_TF_MINUTES.get(timeframe, 0))
+        df = df[df.index + bar_td <= pd.Timestamp(end).tz_convert("UTC")]
+        if df.empty:
+            return FetchResult(
+                status=FetcherStatus.ERROR, data=None, source=self.source_name,
+                error_message="no fully-closed candles in the requested window",
+                latency_ms=(time.monotonic() - t0) * 1000,
+            )
         self.validate_dataframe(df, self.source_name)
         return FetchResult(
             status=FetcherStatus.OK, data=df, source=self.source_name,
