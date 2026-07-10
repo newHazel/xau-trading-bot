@@ -52,3 +52,28 @@ def test_clean_shutdown_terminates_long_child():
     t.join(timeout=15)
     assert not t.is_alive()
     assert child.poll() is not None  # child is dead
+
+
+def test_default_bots_gold_only():
+    """2026-07-10 pivot: the live fleet is GOLD-ONLY unless LIVE_CRYPTO=1."""
+    from scripts.live_all import build_bots
+    bots = build_bots(env={})
+    assert [n for n, _ in bots] == ["gold"]
+    gold_cmd = bots[0][1]
+    assert "--execution-tf" in gold_cmd and "15m" in gold_cmd    # validated live TF
+
+
+def test_crypto_opt_in_via_env():
+    from scripts.live_all import build_bots
+    bots = build_bots(env={"LIVE_CRYPTO": "1"})
+    assert [n for n, _ in bots] == ["gold", "crypto"]
+
+
+def test_gold_live_policy_flips_sweep_kill():
+    from scripts.live_alerts import apply_gold_live_policy
+    cfg = apply_gold_live_policy({"a": 1}, env={})
+    assert cfg["sweep_invalidation_enabled"] is True
+    assert cfg["a"] == 1
+    # instant rollback switch
+    cfg = apply_gold_live_policy({"a": 1}, env={"GOLD_SWEEP_KILL": "0"})
+    assert "sweep_invalidation_enabled" not in cfg

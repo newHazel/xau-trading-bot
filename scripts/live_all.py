@@ -30,13 +30,25 @@ from datetime import datetime, timezone
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY = sys.executable
 
-# Gold now runs on 15m (the audit/A/B showed 15m is far less noisy than 5m for gold,
-# and the promoted OTE + zone-on-15m levers were tuned on 15m). --interval 900 evaluates
-# once per closed 15m candle (:00/:15/:30/:45), aligning alerts + heartbeat to the bar.
-BOTS = [
-    ("gold", [PY, "-u", "scripts/live_alerts.py", "--execution-tf", "15m", "--interval", "900"]),
-    ("crypto", [PY, "-u", "scripts/live_alerts_crypto.py"]),
-]
+# Gold runs on 15m (the audit/A/B showed 15m is far less noisy than 5m for gold,
+# and the levers were validated on 15m). --interval 900 evaluates once per closed
+# 15m candle (:00/:15/:30/:45), aligning alerts + heartbeat to the bar.
+#
+# GOLD-ONLY by default (2026-07-10 pivot): the crypto fleet's backtest verdict was
+# -76R (and generated pre-look-ahead-fix, so not even quotable); gold 15m on the
+# clean engine is the one stream with a positive read. The crypto bot is kept
+# fully working behind an env flag — set LIVE_CRYPTO=1 on the service to revive it.
+def build_bots(env=None):
+    env = os.environ if env is None else env
+    bots = [
+        ("gold", [PY, "-u", "scripts/live_alerts.py", "--execution-tf", "15m", "--interval", "900"]),
+    ]
+    if env.get("LIVE_CRYPTO") == "1":
+        bots.append(("crypto", [PY, "-u", "scripts/live_alerts_crypto.py"]))
+    return bots
+
+
+BOTS = build_bots()
 
 
 def _log(msg: str) -> None:

@@ -1,4 +1,5 @@
-# Render Blueprint — 24/7 LIVE ALERTS bot (alerts-only; gold + crypto fleet).
+# Render Blueprint — 24/7 LIVE ALERTS bot (alerts-only; GOLD-ONLY by default,
+# crypto fleet revivable via LIVE_CRYPTO=1).
 # ─────────────────────────────────────────────────────────────────────────────
 # Deploy:  Render Dashboard → New → Blueprint → connect github.com/newHazel/xau-trading-bot
 #          → Apply.  Then fill the secret env vars (TELEGRAM_*, TWELVE_DATA_API_KEY).

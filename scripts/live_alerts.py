@@ -19,6 +19,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -59,6 +60,21 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def apply_gold_live_policy(config, env=None):
+    """GOLD LIVE POLICY (2026-07-10): sweep-invalidation ON — the gold_kill lever was
+    the top performer on BOTH clean-engine runs (5m least-bad; 15m win 66.7% / PF 4.04
+    / expR +1.09, IS and OOS consistent). Sample was 9 fills (!INSUFF), so this is a
+    PROVISIONAL flip, justified because the lever only SUPPRESSES setups whose sweep
+    extreme was closed through (a structural SMC invalidation) — it never adds a trade.
+    Re-review after the long-history (Dukascopy) run. Instant rollback without a code
+    change: set env GOLD_SWEEP_KILL=0 on the service."""
+    env = os.environ if env is None else env
+    if env.get("GOLD_SWEEP_KILL", "1") == "1":
+        config = {**config, "sweep_invalidation_enabled": True}
+        print("[config] gold live policy: sweep_invalidation_enabled=ON (gold_kill)")
+    return config
+
+
 def main() -> None:
     load_dotenv(_PROJECT_ROOT / ".env")
     args = _parse_args()
@@ -79,6 +95,7 @@ def main() -> None:
     except Exception as exc:
         config = DEFAULT_CONFIG
         print(f"[config] WARNING: using minimal fallback ({exc})")
+    config = apply_gold_live_policy(config)
 
     engine = LiveAlertEngine(
         config=config,
