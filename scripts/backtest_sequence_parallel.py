@@ -222,7 +222,9 @@ def _load(db, sym, tf):
 # it feeds the checkpoint key, so old checkpoints auto-invalidate instead of silently
 # feeding stale signals into a report. v2 = close-time HTF visibility (look-ahead fix).
 # v3 = sweep_src in the signal payload + sweep-quality levers.
-_CKPT_SCHEMA = 3
+# v4 = PDH/PDL computed from COMPLETE previous days only (partial-window levels were
+#      silently wrong and unconfirmable — zero pdh/pdl sweeps in the v3 gold run).
+_CKPT_SCHEMA = 4
 
 
 def _ckpt_key(label, overrides, warmup, window, symbol, exec_tf):

@@ -121,6 +121,50 @@ class TestSweepExtremeBroken:
         assert sweep_extreme_broken(None, 1.0, self.SWEEP) is False
 
 
+class TestPDHCompleteDayOnly:
+    """PDH/PDL from COMPLETE previous days only — a rolling window that starts
+    mid-day must NOT emit a partial-day extreme as the 'previous day high/low'."""
+
+    def _mk(self, start, hours):
+        n = hours * 4                      # 15m bars
+        idx = pd.date_range(start, periods=n, freq="15min", tz="UTC")
+        rng = np.random.default_rng(7)
+        base = 100 + rng.normal(0, 0.2, n).cumsum()
+        return pd.DataFrame({
+            "high": base + 0.5, "low": base - 0.5, "close": base,
+            "open": base, "volume": 1.0,
+            "swing_high": np.nan, "swing_low": np.nan,
+        }, index=idx)
+
+    def test_partial_first_day_yields_nan(self):
+        from core.smc.liquidity_detector import LiquidityDetector
+        # window starts 18:00 D0 → D0 is partial → D1 bars must have NaN pdh/pdl
+        df = self._mk("2026-01-05 18:00", hours=18)          # D0 18:00 → D1 12:00
+        out = LiquidityDetector().detect(df)
+        d1 = out[out.index.normalize() == pd.Timestamp("2026-01-06", tz="UTC")]
+        assert d1["pdh"].isna().all() and d1["pdl"].isna().all()
+
+    def test_complete_prev_day_yields_levels(self):
+        from core.smc.liquidity_detector import LiquidityDetector
+        # window starts 18:00 D0 and spans through D2 → D1 is COMPLETE → D2 has levels
+        df = self._mk("2026-01-05 18:00", hours=42)          # → D2 12:00
+        out = LiquidityDetector().detect(df)
+        d1 = df[df.index.normalize() == pd.Timestamp("2026-01-06", tz="UTC")]
+        d2 = out[out.index.normalize() == pd.Timestamp("2026-01-07", tz="UTC")]
+        assert d2["pdh"].notna().all()
+        assert d2["pdh"].iloc[0] == pytest.approx(float(d1["high"].max()))
+        assert d2["pdl"].iloc[0] == pytest.approx(float(d1["low"].min()))
+
+    def test_midnight_start_day_counts_as_complete(self):
+        from core.smc.liquidity_detector import LiquidityDetector
+        df = self._mk("2026-01-05 00:00", hours=30)          # D0 whole + D1 morning
+        out = LiquidityDetector().detect(df)
+        d1 = out[out.index.normalize() == pd.Timestamp("2026-01-06", tz="UTC")]
+        d0 = df[df.index.normalize() == pd.Timestamp("2026-01-05", tz="UTC")]
+        assert d1["pdh"].notna().all()
+        assert d1["pdh"].iloc[0] == pytest.approx(float(d0["high"].max()))
+
+
 class TestSweepSrcTelemetry:
     def _sig(self, **kw):
         from datetime import datetime, timezone

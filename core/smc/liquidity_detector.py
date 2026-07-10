@@ -199,6 +199,18 @@ class LiquidityDetector:
         # Aggregate H/L per UTC calendar day
         daily = df.resample("D").agg({"high": "max", "low": "min"}).dropna()
 
+        # A day whose FIRST bar is not inside df is PARTIAL — its H/L is the extreme
+        # of whatever tail happened to be in the rolling window, not the day's level.
+        # The live/backtest hooks pass a ~350-bar window (5m -> ~29h), so the previous
+        # calendar day was almost always partial: pdh/pdl were silently too narrow and
+        # (per the sweep-source telemetry) never produced a single confirmable sweep.
+        # Honest behavior: only a COMPLETE previous day yields a level; else NaN.
+        first_ts = df.index[0]
+        complete = daily.index > first_ts.normalize()
+        if len(daily) and first_ts == first_ts.normalize():
+            complete[0] = True   # window starts exactly at midnight -> day 0 is whole
+        daily = daily[complete]
+
         # prev_daily[date] = day-before's H/L. Index unchanged.
         prev_daily = daily.shift(1)
 
