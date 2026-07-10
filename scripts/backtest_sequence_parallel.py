@@ -27,6 +27,7 @@ import os
 import re
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 from multiprocessing import Pool
 
@@ -185,6 +186,15 @@ VARIANTS.update({
     "gold_sk_best":    {**_FRESHNESS, "price_zone_on_15m": True, "sk_entry_grid": True},
     # crypto PROOF path: 9 coins × ~4mo = enough trades to actually PROVE it (gold is data-capped)
     "crypto_sk":       {**_CRYPTO_PCT, "sk_entry_grid": True},
+    # Pine-v3.2 parity levers (GOLD focus): sweep quality + lifecycle.
+    #   gold_sweepq — a wick must penetrate the level by >= 0.05x prior ATR to count
+    #                 as a sweep (kills 1-tick noise pokes at the root of the chain)
+    #   gold_kill   — a bar CLOSING through the sweep extreme kills the setup
+    #   gold_v32    — both + the rejection-candle confirm gate (closest to SMC PRO v3.2)
+    "gold_sweepq":  {**_FRESHNESS, "sweep_min_penetration_enabled": True},
+    "gold_kill":    {**_FRESHNESS, "sweep_invalidation_enabled": True},
+    "gold_v32":     {**_FRESHNESS, "sweep_min_penetration_enabled": True,
+                     "sweep_invalidation_enabled": True, "confirm_gate": True},
 })
 
 
@@ -211,7 +221,8 @@ def _load(db, sym, tf):
 # Bump when signal-generation semantics change (windowing, hooks, fill preconditions):
 # it feeds the checkpoint key, so old checkpoints auto-invalidate instead of silently
 # feeding stale signals into a report. v2 = close-time HTF visibility (look-ahead fix).
-_CKPT_SCHEMA = 2
+# v3 = sweep_src in the signal payload + sweep-quality levers.
+_CKPT_SCHEMA = 3
 
 
 def _ckpt_key(label, overrides, warmup, window, symbol, exec_tf):
@@ -273,7 +284,8 @@ def _gen_chunk(task):
             out.append({"setup_id": sig.setup_id, "direction": sig.direction,
                         "entry": sig.entry, "sl": sig.sl, "tp1": sig.tp1,
                         "tp2": sig.tp2 if sig.tp2 is not None else sig.tp1,
-                        "grade": sig.grade, "gpos": gpos, "ts": ts.isoformat()})
+                        "grade": sig.grade, "gpos": gpos, "ts": ts.isoformat(),
+                        "sweep_src": getattr(sig, "sweep_src", None)})
     os.makedirs(out_dir, exist_ok=True)
     with open(ckpt, "w") as f:
         json.dump(out, f)
@@ -410,6 +422,10 @@ def _report(by, exec_df, range_start, n, exec_tf, variants, span, months, args):
         ex = " | ".join(f"{et}:{s['count']}/{s['total_r']:+.1f}R" for et, s in m.exit_types.items())
         print(f"\n  [{v}] dir : {ds}")
         print(f"  [{v}] exit: {ex}")
+        # which liquidity got swept (telemetry — does PDH/EQH beat plain swings?)
+        srcs = Counter(str(sg.get("sweep_src")) for sg in by[v] if sg.get("sweep_src"))
+        if srcs:
+            print(f"  [{v}] swept: " + " | ".join(f"{k}:{n}" for k, n in srcs.most_common()))
         if args.bootstrap:
             ci = bootstrap_ci(rv)
             c = ci["ci"]

@@ -245,21 +245,41 @@ class TestTier4Degraded:
         assert nf.is_blocked(ppi_time) is False
 
 
+# data/calendar/manual_news.csv is a ROLLING operational file (rewritten weekly by
+# scripts/update_news_calendar.py), so CSV tests pin their OWN fixture instead of
+# asserting on live calendar content (which broke every refresh).
+_FIXTURE_CSV = """event_time,currency,impact,tier,title,actual,forecast,previous
+2026-05-06T18:00:00Z,USD,HIGH,1,FOMC Meeting Minutes,,,
+2026-05-09T12:30:00Z,USD,HIGH,2,CPI m/m,,,
+2026-06-03T12:30:00Z,USD,HIGH,1,NFP,,,
+"""
+
+
+@pytest.fixture
+def fixture_csv(tmp_path):
+    p = tmp_path / "manual_news.csv"
+    p.write_text(_FIXTURE_CSV)
+    return str(p)
+
+
 class TestCSVFallback:
-    def test_load_from_csv(self, nf):
-        loaded = nf.load_from_csv()
+    def test_load_from_csv(self, fixture_csv):
+        nf = NewsFilter(NEWS_CONFIG)
+        loaded = nf.load_from_csv(fixture_csv)
         assert loaded is True
         assert nf.data_loaded is True
         assert len(nf.events) == 3
 
-    def test_csv_events_have_correct_tiers(self, nf):
-        nf.load_from_csv()
+    def test_csv_events_have_correct_tiers(self, fixture_csv):
+        nf = NewsFilter(NEWS_CONFIG)
+        nf.load_from_csv(fixture_csv)
         fomc = [e for e in nf.events if "FOMC" in e.title]
         assert len(fomc) == 1
         assert fomc[0].tier == 1
 
-    def test_csv_fomc_blocks(self, nf):
-        nf.load_from_csv()
+    def test_csv_fomc_blocks(self, fixture_csv):
+        nf = NewsFilter(NEWS_CONFIG)
+        nf.load_from_csv(fixture_csv)
         fomc_time = datetime(2026, 5, 6, 18, 0, tzinfo=UTC)
         check_time = fomc_time - timedelta(minutes=30)
         result = nf.check(check_time)
@@ -270,9 +290,13 @@ class TestCSVFallback:
         loaded = nf.load_from_csv("data/calendar/nonexistent.csv")
         assert loaded is False
 
-    def test_auto_fallback_on_check(self):
-        nf = NewsFilter(NEWS_CONFIG, project_root=PROJECT_ROOT)
-        # Don't manually load — check() should auto-load from CSV
+    def test_auto_fallback_on_check(self, fixture_csv):
+        # check() auto-loads via ensure_loaded() from the configured fallback path
+        cfg = {**NEWS_CONFIG,
+               "fallback": {**NEWS_CONFIG.get("fallback", {}),
+                            "use_manual_csv_if_api_fails": True,
+                            "manual_csv_path": fixture_csv}}
+        nf = NewsFilter(cfg)
         fomc_time = datetime(2026, 5, 6, 18, 0, tzinfo=UTC)
         check_time = fomc_time - timedelta(minutes=30)
         result = nf.check(check_time)

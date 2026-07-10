@@ -150,6 +150,9 @@ class PipelineSignal:
     bar_index: int
     approved: bool
     decision: Optional[RulebookDecision] = None
+    # which liquidity the captured sweep grabbed (swing_low/eql/pdl/swing_high/eqh/pdh);
+    # telemetry only — lets reports/alerts break results down by sweep source.
+    sweep_src: Optional[str] = None
 
     def to_signal_dict(self) -> Dict[str, Any]:
         """Format expected by backtesting.backtest_runner.BacktestRunner."""
@@ -164,6 +167,7 @@ class PipelineSignal:
             "timestamp": self.timestamp,
             "bar_index": self.bar_index,
             "grade": self.grade,
+            "sweep_src": self.sweep_src,
         }
 
     def to_dict(self) -> Dict[str, Any]:

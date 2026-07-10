@@ -73,6 +73,9 @@ class TelegramSender:
             f"TP2:   {_fmt(s.get('tp2'))}",
             f"R:R:   {rr:.2f}",
         ]
+        src = s.get("sweep_src")
+        if src:
+            lines.append(f"Sweep: {str(src).replace('_', ' ').upper()}")
         ts = s.get("timestamp")
         if ts:
             lines.append(f"\n🕐 {ts}")

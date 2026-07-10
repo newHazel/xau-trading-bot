@@ -47,6 +47,29 @@ sweep:
   require_micro_choch_after_sweep: true
   allow_displacement_as_confirmation: true
   reject_if_no_confirmation_after_window: true
+# --- Sweep quality + lifecycle (Pine-v3.2 parity levers; default OFF = live
+#     unchanged; flipped on by the gold_sweepq / gold_kill / gold_v32 variants) ---
+# ON: a wick must penetrate the level by >= sweep.min_wick_penetration_atr_multiplier
+# x prior ATR to register as a sweep. OFF: any 1-tick poke counts (current behavior).
+sweep_min_penetration_enabled: false
+# ON: once the sweep is captured, a bar CLOSING through the sweep leg's extreme kills
+# the setup mid-sequence (grabbed stops won -> continuation, not reversal).
+sweep_invalidation_enabled: false
+
+# --- Live filter tuning (values below = the EXACT hardcoded defaults the live
+#     gate has been running on; the sections were previously missing, so these
+#     filters were untunable — edit here to tune, no code change needed) --------
+volatility:
+  low_atr_ratio: 0.5        # ATR/median below this = DEAD regime (blocked)
+  high_atr_ratio: 1.5       # above this = HIGH (allowed, flagged)
+  extreme_atr_ratio: 2.5    # above this = EXTREME (blocked)
+  atr_median_lookback: 100
+market_state:
+  state_lookback_candles: 20
+  choppy_wick_ratio: 0.6
+  ranging_cross_ratio: 0.4
+  news_spike_atr_mult: 3.0
+
 zone_freshness:
   max_minutes_in_zone_before_decay: 15
   decay_grade_after_minutes: true

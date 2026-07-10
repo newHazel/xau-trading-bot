@@ -67,6 +67,22 @@ def _advance_condition(ctx: PipelineContext, key: str) -> bool:
     return False
 
 
+def sweep_extreme_broken(direction, close, sweep) -> bool:
+    """True when a bar CLOSED through the captured sweep's wick extreme AGAINST the
+    setup: a long dies on close < extreme (the swept low was reclaimed by sellers),
+    a short dies on close > extreme. None/missing extreme -> never broken."""
+    if not isinstance(sweep, dict):
+        return False
+    ext = sweep.get("wick_extreme")
+    if ext is None:
+        return False
+    if direction == "long":
+        return close < float(ext)
+    if direction == "short":
+        return close > float(ext)
+    return False
+
+
 class SequenceRunner:
     def __init__(
         self,
@@ -121,6 +137,12 @@ class SequenceRunner:
         # through, so it is a dead-on-arrival loss (e.g. 2026-06-16 05:35 long: entry
         # 4324.87 / SL 4321.90 while price had already closed 4319.53, below the SL).
         self._price_sanity_gate = bool(config.get("price_sanity_gate", False))
+
+        # Pine-v3.2 parity (default OFF -> live unchanged): once the sweep is captured,
+        # a bar that CLOSES through the sweep leg's extreme kills the setup — the
+        # grabbed stops WON, this is continuation, not a reversal setup. Runs every
+        # bar mid-sequence, unlike the emit-time price_sanity_gate.
+        self._sweep_invalidation = bool(config.get("sweep_invalidation_enabled", False))
 
     @property
     def state(self) -> State:
@@ -195,6 +217,14 @@ class SequenceRunner:
             if ctx.htf_bias not in ("long", "short") or ctx.htf_bias != self._locked_direction:
                 self._reset(now, "htf bias lost/flipped")
                 return None
+            if self._sweep_invalidation and "sweep" in self._captured:
+                df = history.get(self._exec_tf) if isinstance(history, dict) else None
+                if df is not None and getattr(df, "empty", True) is False and len(df) >= 1:
+                    if sweep_extreme_broken(self._locked_direction,
+                                            float(df["close"].iloc[-1]),
+                                            self._captured.get("sweep")):
+                        self._reset(now, "sweep extreme closed through — setup dead")
+                        return None
 
         # try to advance as far as possible this bar (a fast bar can clear several steps)
         for _ in range(len(_SEQUENCE)):
@@ -366,6 +396,9 @@ class SequenceRunner:
             score=decision.grade.score if decision.grade else 0,
             timestamp=now, bar_index=ctx.bar_index,
             approved=decision.approved, decision=decision,
+            # source of the captured sweep (swing_low/eql/pdl/...) — pure telemetry:
+            # lets the backtest report + Telegram alert say WHICH liquidity was grabbed.
+            sweep_src=(self._captured.get("sweep") or {}).get("type"),
         )
 
     def _reset(self, now: datetime, reason: str) -> None:

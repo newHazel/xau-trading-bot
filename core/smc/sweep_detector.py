@@ -55,6 +55,8 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from core.smc.atr_util import rolling_atr
+
 logger = logging.getLogger(__name__)
 
 
@@ -74,10 +76,19 @@ class SweepDetector:
     BEAR_TYPES = ("swing_high", "eqh", "pdh")    # resistance levels
     BULL_TYPES = ("swing_low",  "eql", "pdl")    # support levels
 
-    def __init__(self, window: int = DEFAULT_WINDOW) -> None:
+    def __init__(self, window: int = DEFAULT_WINDOW,
+                 min_penetration_atr_mult: float = 0.0) -> None:
         if window < 1:
             raise ValueError(f"window must be >= 1, got {window}")
+        if min_penetration_atr_mult < 0:
+            raise ValueError(
+                f"min_penetration_atr_mult must be >= 0, got {min_penetration_atr_mult}")
         self._window = int(window)
+        # Sweep-quality gate (0 = off, current behavior): the wick must penetrate the
+        # level by >= mult x PRIOR-bar ATR to register. A 1-tick poke beyond a level is
+        # noise, not a liquidity grab (honors smc_rules.yaml
+        # min_wick_penetration_atr_multiplier, previously read by nothing).
+        self._min_pen_mult = float(min_penetration_atr_mult)
         # sweep_early exposure (default-OFF feature): snapshot of the wicks still
         # PENDING (wicked beyond a level, not yet closed-back or expired) at the last
         # bar of detect(). Written every detect() but READ only by get_last_pending_sweep.
@@ -142,6 +153,13 @@ class SweepDetector:
         pending_bear: List[Dict] = []
         pending_bull: List[Dict] = []
 
+        # Prior-bar ATR for the optional penetration gate — same rolling_atr as the
+        # other detectors (min_periods=1, defined from bar 0 -> no NaN branch needed).
+        pen_atr = None
+        if self._min_pen_mult > 0:
+            _atr = rolling_atr(h_arr, l_arr, c_arr, 14)
+            pen_atr = np.concatenate(([_atr[0]], _atr[:-1]))
+
         n_bull = 0
         n_bear = 0
 
@@ -184,6 +202,8 @@ class SweepDetector:
                 if lvl is None or swept_at[t] == lvl:
                     continue
                 if high > lvl:
+                    if pen_atr is not None and (high - lvl) < self._min_pen_mult * pen_atr[pos]:
+                        continue   # poke too shallow to be a stop-run
                     if not any(p["type"] == t and p["level"] == lvl for p in pending_bear):
                         pending_bear.append({"type": t, "level": lvl, "wick_bar": pos})
 
@@ -192,6 +212,8 @@ class SweepDetector:
                 if lvl is None or swept_at[t] == lvl:
                     continue
                 if low < lvl:
+                    if pen_atr is not None and (lvl - low) < self._min_pen_mult * pen_atr[pos]:
+                        continue   # poke too shallow to be a stop-run
                     if not any(p["type"] == t and p["level"] == lvl for p in pending_bull):
                         pending_bull.append({"type": t, "level": lvl, "wick_bar": pos})
 
@@ -257,12 +279,21 @@ class SweepDetector:
         if s.empty:
             return None
         confirm_ts = s.index[-1]
+        wb = int(df_with_sweeps.loc[confirm_ts, col_w])
+        # wick_extreme = the sweep leg's true tip (bull: the swept low's wick low;
+        # bear: the wick high). Consumed by the optional sweep_invalidation guard —
+        # a bar CLOSING through it means the "grabbed" stops won (continuation).
+        ext = None
+        if 0 <= wb < len(df_with_sweeps):
+            row = df_with_sweeps.iloc[wb]
+            ext = float(row["low"]) if direction == "bull" else float(row["high"])
         return {
             "confirm_ts": confirm_ts,
             "confirm_pos": int(df_with_sweeps.index.get_loc(confirm_ts)),
             "level":       float(s.iloc[-1]),
             "type":        str(df_with_sweeps.loc[confirm_ts, col_t]),
-            "wick_bar":    int(df_with_sweeps.loc[confirm_ts, col_w]),
+            "wick_bar":    wb,
+            "wick_extreme": ext,
             "direction":   direction,
         }
 

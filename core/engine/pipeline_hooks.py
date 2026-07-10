@@ -329,10 +329,17 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
     # count levers — previously these YAML keys were read by NOTHING (audit finding).
     # Enabling this also applies YAML break_lookback (3→5, a stricter grade-only
     # displacement booster), so re-baseline the backtest after flipping it on.
+    _swp_cfg = config.get("sweep", {}) or {}
+    # Sweep-quality gate (default OFF -> live unchanged): honor the previously-dead
+    # smc_rules.yaml key min_wick_penetration_atr_multiplier — a wick must penetrate
+    # the level by >= mult x prior ATR to register as a sweep (Pine-v3.2 parity).
+    _pen_mult = (float(_swp_cfg.get("min_wick_penetration_atr_multiplier", 0.05))
+                 if config.get("sweep_min_penetration_enabled", False) else 0.0)
     if config.get("wire_detector_config", False):
-        _swp = config.get("sweep", {}) or {}
+        _swp = _swp_cfg
         _dsp = config.get("displacement", {}) or {}
-        sweeps = SweepDetector(window=int(_swp.get("confirmation_window_candles", 5)))
+        sweeps = SweepDetector(window=int(_swp.get("confirmation_window_candles", 5)),
+                               min_penetration_atr_mult=_pen_mult)
         fvgs = FVGDetector(
             atr_period=int(_dsp.get("atr_period", 14)),
             size_threshold_atr_pct=float(config.get("fvg_min_atr_ratio", 0.3)),
@@ -344,7 +351,7 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
             atr_period=int(_dsp.get("atr_period", 14)),
         )
     else:
-        sweeps = SweepDetector()
+        sweeps = SweepDetector(min_penetration_atr_mult=_pen_mult)
         fvgs = FVGDetector()
         displacement = DisplacementDetector()
     # how recently (in execution-TF bars) a sweep must have fired to count

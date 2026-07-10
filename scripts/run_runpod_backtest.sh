@@ -121,7 +121,7 @@ if [ "${RUN_GOLD:-0}" = "1" ]; then
     fi
     $PY -u scripts/backtest_sequence_parallel.py --symbol XAUUSD --execution-tf 5m \
       --total-bars "${GOLD_BARS:-18000}" --chunk-bars 1500 --jobs "${JOBS}" \
-      --variants "${GOLD_VARIANTS:-freshness,gold_confirm,gold_trend}" --db-path "${DB_PATH}" \
+      --variants "${GOLD_VARIANTS:-freshness,gold_confirm,gold_sweepq,gold_kill,gold_v32}" --db-path "${DB_PATH}" \
       --out-dir "$GOUT" --oos-ratio "${OOS_RATIO}" --bootstrap --min-trades "${MIN_TRADES}" \
       --min-oos-trades 10 --baseline freshness --export ${AGG}
   fi

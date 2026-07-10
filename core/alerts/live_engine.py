@@ -296,6 +296,7 @@ class LiveAlertEngine:
             "tp2": sig.tp2,
             "rr": round(rr, 3),
             "grade": sig.grade,
+            "sweep_src": getattr(sig, "sweep_src", None),
             "confidence_score": sig.score,
             "status": "sent",
             "strategy_version": "v1.2",
