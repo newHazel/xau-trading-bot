@@ -579,14 +579,21 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
         # recent SAME-direction 1H order block — entries floating far from any HTF POI
         # are blocked. filter_hook folds htf_ob_ok into no_blocking_filters. ---
         if config.get("htf_ob_gate", False):
-            ok = False
+            ok = True   # fail-open: if the HTF frame can't be scored, don't block
             htf_df = _tf(history, str(config.get("htf_ob_tf", "1h")))
             if htf_df is not None and len(htf_df) >= 30:
-                ob_df = obs.detect(swings.detect(htf_df, str(config.get("htf_ob_tf", "1h"))))
-                blocks = obs.get_order_blocks(ob_df, direction=smc_dir, n=3)
-                if blocks:
-                    tol = float(config.get("htf_ob_atr_mult", 1.0)) * compute_atr(df)
-                    ok = near_any_ob(float(df["close"].iloc[-1]), blocks, tol)
+                try:
+                    # OrderBlockDetector needs FVG (or BOS) trigger columns first —
+                    # same chain the exec-TF path uses: obs.detect(fvgs.detect(df)).
+                    ob_df = obs.detect(fvgs.detect(htf_df))
+                    blocks = obs.get_order_blocks(ob_df, direction=smc_dir, n=3)
+                    if blocks:
+                        tol = float(config.get("htf_ob_atr_mult", 1.0)) * compute_atr(df)
+                        ok = near_any_ob(float(df["close"].iloc[-1]), blocks, tol)
+                    else:
+                        ok = False   # no recent same-direction HTF OB → gate blocks
+                except Exception:
+                    ok = True        # detector hiccup on the HTF frame → fail-open
             ctx.extra["htf_ob_ok"] = ok
 
     return hook
