@@ -67,6 +67,16 @@ def _advance_condition(ctx: PipelineContext, key: str) -> bool:
     return False
 
 
+def retrace_lookback(flag: bool, captured_bar, current_bar, default: int = 3) -> int:
+    """How many trailing bars may satisfy the retrace test. With the Pine-v4 parity
+    flag ON, only bars strictly AFTER the FVG-capture bar count — the capture bar's
+    own range must not both create the zone and 'retrace' into it (that degenerates
+    the retest entry into a same-bar breakout entry). 0 = retrace impossible yet."""
+    if not flag or captured_bar is None or current_bar is None:
+        return default
+    return max(0, min(default, int(current_bar) - int(captured_bar)))
+
+
 def sweep_extreme_broken(direction, close, sweep) -> bool:
     """True when a bar CLOSED through the captured sweep's wick extreme AGAINST the
     setup: a long dies on close < extreme (the swept low was reclaimed by sellers),
@@ -144,6 +154,12 @@ class SequenceRunner:
         # bar mid-sequence, unlike the emit-time price_sanity_gate.
         self._sweep_invalidation = bool(config.get("sweep_invalidation_enabled", False))
 
+        # Pine-v4 parity (default OFF -> live unchanged): the retrace gate only counts
+        # bars AFTER the FVG was captured — the zone-forming bar can't also be the
+        # retrace. Kills the 'retrace auto-passes on the formation bar' failure mode.
+        self._retrace_next_bar = bool(config.get("retrace_next_bar_only", False))
+        self._fvg_captured_bar = None
+
     @property
     def state(self) -> State:
         return self._sm.state
@@ -195,9 +211,14 @@ class SequenceRunner:
             if df is not None and getattr(df, "empty", True) is False and len(df) >= 1:
                 lo = min(cap_fvg["top"], cap_fvg["bottom"])
                 hi = max(cap_fvg["top"], cap_fvg["bottom"])
-                rl = float(df["low"].iloc[-3:].min())
-                rh = float(df["high"].iloc[-3:].max())
-                ctx.retraced_to_zone = (rl <= hi and rh >= lo)
+                lb = retrace_lookback(self._retrace_next_bar, self._fvg_captured_bar,
+                                      ctx.bar_index)
+                if lb <= 0:
+                    ctx.retraced_to_zone = False
+                else:
+                    rl = float(df["low"].iloc[-lb:].min())
+                    rh = float(df["high"].iloc[-lb:].max())
+                    ctx.retraced_to_zone = (rl <= hi and rh >= lo)
 
         # cooldown after a signal
         if self._cooldown_left > 0:
@@ -232,6 +253,12 @@ class SequenceRunner:
             if state not in _SEQUENCE_MAP:
                 break
             cond_key, nxt = _SEQUENCE_MAP[state]
+            # Pine-v4 parity: retrace may not be satisfied on the FVG-capture bar
+            # itself (the fast path captures fvg AND passes retrace within one bar).
+            if (cond_key == "retrace" and self._retrace_next_bar
+                    and self._fvg_captured_bar is not None
+                    and int(ctx.bar_index) <= int(self._fvg_captured_bar)):
+                break
             if not _advance_condition(ctx, cond_key):
                 break
             self._sm.transition(nxt, f"{cond_key} met", now)
@@ -242,6 +269,7 @@ class SequenceRunner:
                 self._captured["sweep"] = ctx.sweep
             if cond_key == "fvg":
                 self._captured["fvg"] = ctx.fvg
+                self._fvg_captured_bar = ctx.bar_index
 
         if self._sm.state == State.SIGNAL_READY:
             return self._emit(ctx, bar, history, now)
@@ -407,6 +435,7 @@ class SequenceRunner:
         self._locked_direction = None
         self._captured = {}
         self._bars_since_repin = 0
+        self._fvg_captured_bar = None
 
     def _default_setup_id(self, ctx: PipelineContext) -> str:
         self._counter += 1

@@ -195,6 +195,14 @@ VARIANTS.update({
     "gold_kill":    {**_FRESHNESS, "sweep_invalidation_enabled": True},
     "gold_v32":     {**_FRESHNESS, "sweep_min_penetration_enabled": True,
                      "sweep_invalidation_enabled": True, "confirm_gate": True},
+    # Pine-v4.0 parity levers (gold) — each tested ALONE vs freshness (no stacking;
+    # gold_v32 proved stacked gates choke the signal flow):
+    #   gold_htfob   — entry must sit inside/near a same-direction 1H order block
+    #   gold_macd    — MACD histogram+line alignment required at the trigger
+    #   gold_nextbar — retrace only counts on bars AFTER the FVG-capture bar
+    "gold_htfob":   {**_FRESHNESS, "htf_ob_gate": True},
+    "gold_macd":    {**_FRESHNESS, "macd_gate": True},
+    "gold_nextbar": {**_FRESHNESS, "retrace_next_bar_only": True},
 })
 
 

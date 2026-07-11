@@ -56,6 +56,19 @@ sweep_min_penetration_enabled: false
 # the setup mid-sequence (grabbed stops won -> continuation, not reversal).
 sweep_invalidation_enabled: false
 
+# --- Pine-v4.0 parity levers (default OFF; gold_htfob / gold_macd / gold_nextbar) ---
+# ON: price must sit inside/near (±htf_ob_atr_mult x ATR) a recent same-direction
+# 1H order block for the entry to pass (HTF POI confluence as a GATE).
+htf_ob_gate: false
+htf_ob_tf: "1h"
+htf_ob_atr_mult: 1.0
+# ON: MACD (12/26/9) histogram momentum + line-vs-signal must agree with the trade
+# direction at the trigger.
+macd_gate: false
+# ON: the retrace gate only counts bars AFTER the FVG-capture bar (the zone-forming
+# bar can't also be the retrace).
+retrace_next_bar_only: false
+
 # --- Live filter tuning (values below = the EXACT hardcoded defaults the live
 #     gate has been running on; the sections were previously missing, so these
 #     filters were untunable — edit here to tune, no code change needed) --------

@@ -112,6 +112,30 @@ def compute_rsi(df: pd.DataFrame, period: int = 14) -> float:
     return 100.0 - 100.0 / (1.0 + rs)
 
 
+def compute_macd_alignment(df: pd.DataFrame, is_long: bool,
+                           fast: int = 12, slow: int = 26, signal: int = 9) -> bool:
+    """Pine-v4 trigger alignment: MACD histogram momentum in the trade direction AND
+    the macd line on the right side of its signal (or crossing it this bar).
+    Warm-up (<2 bars of hist) never blocks."""
+    close = df["close"].astype(float)
+    macd = close.ewm(span=fast, adjust=False).mean() - close.ewm(span=slow, adjust=False).mean()
+    sig = macd.ewm(span=signal, adjust=False).mean()
+    hist = macd - sig
+    if len(hist) < 2:
+        return True
+    h0, h1 = float(hist.iloc[-1]), float(hist.iloc[-2])
+    m0, s0 = float(macd.iloc[-1]), float(sig.iloc[-1])
+    m1, s1 = float(macd.iloc[-2]), float(sig.iloc[-2])
+    if is_long:
+        return h0 > h1 and (m0 > s0 or (m1 <= s1 and m0 > s0))
+    return h0 < h1 and (m0 < s0 or (m1 >= s1 and m0 < s0))
+
+
+def near_any_ob(price: float, blocks: list, tol: float) -> bool:
+    """True when price sits inside any OB zone widened by tol (Pine htfPoiATR)."""
+    return any(b["bottom"] - tol <= price <= b["top"] + tol for b in blocks)
+
+
 def compute_ema_bias(df: pd.DataFrame, fast: int = 50, slow: int = 200) -> str:
     """Execution-TF trend bias from EMA50/EMA200: 'long' if price>EMA200 AND EMA50>EMA200,
     'short' if price<EMA200 AND EMA50<EMA200, else 'neutral'. Used by the trend_gate to
@@ -544,6 +568,27 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
             ctx.extra["trend_bias"] = bias
             ctx.extra["trend_ok"] = (bias != "short") if is_long else (bias != "long")
 
+        # --- MACD trigger alignment (macd_gate, default OFF): Pine-v4 useMACD parity.
+        # Histogram momentum + line-vs-signal must agree with the trade direction at
+        # the trigger. filter_hook folds macd_ok into no_blocking_filters. ---
+        if config.get("macd_gate", False):
+            ctx.extra["macd_ok"] = compute_macd_alignment(df, is_long)
+
+        # --- HTF Order-Block confluence (htf_ob_gate, default OFF): Pine-v4 htfPoiMode
+        # 'Required'. The current price must sit inside/near (±htf_ob_atr_mult x ATR) a
+        # recent SAME-direction 1H order block — entries floating far from any HTF POI
+        # are blocked. filter_hook folds htf_ob_ok into no_blocking_filters. ---
+        if config.get("htf_ob_gate", False):
+            ok = False
+            htf_df = _tf(history, str(config.get("htf_ob_tf", "1h")))
+            if htf_df is not None and len(htf_df) >= 30:
+                ob_df = obs.detect(swings.detect(htf_df, str(config.get("htf_ob_tf", "1h"))))
+                blocks = obs.get_order_blocks(ob_df, direction=smc_dir, n=3)
+                if blocks:
+                    tol = float(config.get("htf_ob_atr_mult", 1.0)) * compute_atr(df)
+                    ok = near_any_ob(float(df["close"].iloc[-1]), blocks, tol)
+            ctx.extra["htf_ob_ok"] = ok
+
     return hook
 
 
@@ -641,12 +686,15 @@ def make_filter_hook(config: Optional[Dict[str, Any]] = None,
         # trend gate (set in smc_hook, which runs before this filter): block a
         # counter-trend entry. Absent (trend_gate OFF) → defaults True → unchanged.
         trend_ok = bool(ctx.extra.get("trend_ok", True))
+        # Pine-v4 levers (absent when their flags are OFF -> default True -> unchanged)
+        macd_ok = bool(ctx.extra.get("macd_ok", True))
+        htf_ob_ok = bool(ctx.extra.get("htf_ob_ok", True))
 
         # no_blocking_filters covers the AUXILIARY filters only. kill_zone and
         # news_clear are their own separate mandatory conditions — don't double-count
         # them here (that would fail two mandatories at once on any off-session bar).
         ctx.no_blocking_filters = bool(spread_ok and vol_ok and state_ok and corr_ok
-                                       and funding_ok and trend_ok)
+                                       and funding_ok and trend_ok and macd_ok and htf_ob_ok)
 
         # DXY alignment (optional booster). Needs a DXY DataFrame in history.
         dxy_df = _tf(history, "dxy")
