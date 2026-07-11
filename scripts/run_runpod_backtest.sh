@@ -112,7 +112,16 @@ if [ "${RUN_GOLD:-0}" = "1" ]; then
     echo "!! RUN_GOLD=1 but TWELVE_DATA_API_KEY is unset — skipping gold."
   else
     GOUT="${OUT_ROOT}/XAUUSD"; mkdir -p "$GOUT"
-    if [ -z "$AGG" ] && [ ! -f "data/candles/XAUUSD/5m.csv" ]; then
+    # DATA source: GOLD_DATA=dukascopy (default) pulls FREE years-deep tick history
+    # (clears min-N; also writes an empirical spread model), else Twelve Data (~4mo cap).
+    if [ -z "$AGG" ] && [ "${GOLD_DATA:-dukascopy}" = "dukascopy" ]; then
+      DUKA_START="${DUKA_START:-2019-01-01}"; DUKA_END="${DUKA_END:-2026-01-01}"
+      echo ">>> [data] Dukascopy XAUUSD ticks ${DUKA_START}→${DUKA_END} (cached; resumable)"
+      $PY -u scripts/fetch_dukascopy_history.py --symbol XAUUSD \
+        --start "${DUKA_START}" --end "${DUKA_END}" --timeframes 5m,15m,1h,4h \
+        --db-path "${DB_PATH}" --cache-dir "${DUKA_CACHE:-${PERSIST_DIR}/duka_cache}" \
+        --spread-out "data/spread/XAUUSD/spread_by_hour.csv" || true
+    elif [ -z "$AGG" ] && [ ! -f "data/candles/XAUUSD/5m.csv" ]; then
       echo ">>> [data] fetching gold per-TF from Twelve Data (HTF first, 65s gaps for 8 req/min)"
       for tf in 4h 1h 15m 5m; do
         $PY scripts/fetch_twelvedata_history.py --months 4 --timeframes "$tf" --db-path "${DB_PATH}" || true
@@ -120,7 +129,7 @@ if [ "${RUN_GOLD:-0}" = "1" ]; then
       done
     fi
     $PY -u scripts/backtest_sequence_parallel.py --symbol XAUUSD --execution-tf 5m \
-      --total-bars "${GOLD_BARS:-18000}" --chunk-bars 1500 --jobs "${JOBS}" \
+      --total-bars "${GOLD_BARS:-100000}" --chunk-bars 1500 --jobs "${JOBS}" \
       --variants "${GOLD_VARIANTS:-freshness,gold_kill,gold_htfob,gold_macd,gold_nextbar}" --db-path "${DB_PATH}" \
       --out-dir "$GOUT" --oos-ratio "${OOS_RATIO}" --bootstrap --min-trades "${MIN_TRADES}" \
       --min-oos-trades 10 --baseline freshness --export ${AGG}
