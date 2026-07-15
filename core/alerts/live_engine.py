@@ -81,7 +81,7 @@ class LiveAlertEngine:
         config = _inject_live_news_policy(config)
 
         _sm = config.get("state_machine") or {}
-        _tf_min = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240}.get(live.execution_tf, 5)
+        _tf_min = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "1h": 60, "4h": 240}.get(live.execution_tf, 5)
         _cd_min = _sm.get("cooldown_minutes_after_signal")
         _ex_min = _sm.get("setup_expiry_minutes")
         _cooldown_bars = max(1, round(_cd_min / _tf_min)) if _cd_min is not None else 8

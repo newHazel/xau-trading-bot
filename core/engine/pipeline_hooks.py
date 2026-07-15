@@ -388,7 +388,7 @@ def make_smc_hook(config: Optional[Dict[str, Any]] = None,
     # CHoCH confirms slower than a sweep — give it a wider window
     choch_recency = int(config.get("choch_recency_bars", 20))
     # the "micro" CHoCH lives on the timeframe BELOW execution (doc: "CHoCH on 5m")
-    _ltf_below = {"4h": "1h", "1h": "15m", "15m": "5m", "5m": "1m", "1m": "1m"}
+    _ltf_below = {"4h": "1h", "1h": "15m", "15m": "5m", "5m": "3m", "3m": "1m", "1m": "1m"}
     micro_tf = _ltf_below.get(execution_tf, execution_tf)
 
     def hook(ctx: PipelineContext, bar: Any, history: Any) -> None:

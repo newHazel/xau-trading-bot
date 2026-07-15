@@ -52,8 +52,8 @@ from core.logging.system_logger import SystemLogger
 SOURCE = "dukascopy"
 _BASE = "https://datafeed.dukascopy.com/datafeed"
 _REC = struct.Struct(">IIIff")   # ms, ask, bid, askVol, bidVol (big-endian)
-_TF_RULE = {"5m": "5min", "15m": "15min", "1h": "1h", "4h": "4h"}
-_TF_MIN = {"5m": 5, "15m": 15, "1h": 60, "4h": 240}
+_TF_RULE = {"3m": "3min", "5m": "5min", "15m": "15min", "1h": "1h", "4h": "4h"}
+_TF_MIN = {"3m": 3, "5m": 5, "15m": 15, "1h": 60, "4h": 240}
 _HEADERS = {"User-Agent": "Mozilla/5.0 (xau-trading-bot dukascopy fetch)"}
 
 

@@ -68,7 +68,7 @@ class TestNoKey:
     def test_unsupported_timeframe(self, monkeypatch):
         monkeypatch.setenv("TWELVE_DATA_API_KEY", "k")
         f = TwelveDataFetcher()
-        res = f.fetch_candles("XAUUSD", "3m", START, END)
+        res = f.fetch_candles("XAUUSD", "7m", START, END)  # 7m is genuinely unmapped
         assert res.status == FetcherStatus.ERROR
         assert "timeframe" in res.error_message.lower()
 

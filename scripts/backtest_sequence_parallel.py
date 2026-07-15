@@ -47,7 +47,7 @@ from backtesting.metrics import compute_metrics
 from backtesting.bootstrap import bootstrap_ci, bootstrap_diff, holm_threshold
 from core.data.funding_provider import load_funding
 
-_TFS = ["4h", "1h", "15m", "5m", "1m"]
+_TFS = ["4h", "1h", "15m", "5m", "3m", "1m"]
 DB_DEFAULT = "data/database/trading_bot.sqlite"
 OUT_DEFAULT = "/tmp/bt_chunks"
 
@@ -203,6 +203,12 @@ VARIANTS.update({
     "gold_htfob":   {**_FRESHNESS, "htf_ob_gate": True},
     "gold_macd":    {**_FRESHNESS, "macd_gate": True},
     "gold_nextbar": {**_FRESHNESS, "retrace_next_bar_only": True},
+    # ALL-SESSIONS test (Asia + London + NY, not just the NY kill-zone): the
+    # kill_zone mandatory is treated as always-satisfied. gold_allsess = plain
+    # all-hours; gold_allsess_kill stacks the champion kill gate on top.
+    "gold_allsess":      {**_FRESHNESS, "ignore_kill_zone": True},
+    "gold_allsess_kill": {**_FRESHNESS, "ignore_kill_zone": True,
+                          "sweep_invalidation_enabled": True},
 })
 
 
@@ -232,7 +238,8 @@ def _load(db, sym, tf):
 # v3 = sweep_src in the signal payload + sweep-quality levers.
 # v4 = PDH/PDL computed from COMPLETE previous days only (partial-window levels were
 #      silently wrong and unconfirmable — zero pdh/pdl sweeps in the v3 gold run).
-_CKPT_SCHEMA = 4
+# v5 = 3m execution support + all-sessions (ignore_kill_zone) variants.
+_CKPT_SCHEMA = 5
 
 
 def _ckpt_key(label, overrides, warmup, window, symbol, exec_tf):
@@ -279,6 +286,8 @@ def _gen_chunk(task):
         cfg[_k] = {**cfg[_k], **_v} if isinstance(_v, dict) and isinstance(cfg.get(_k), dict) else _v
     runner = SequenceRunner(cfg, execution_tf=exec_tf, account_balance=10000.0,
                             tradeable_grades=("A+", "A", "B"))
+    from core.filters.session_filter import SessionFilter
+    _sessf = SessionFilter(cfg.get("session", cfg))
     feed_start = max(window, real_start - warmup)
     out = []
     for gpos in range(feed_start, real_end):
@@ -291,11 +300,16 @@ def _gen_chunk(task):
         bar = {"timestamp": ts.to_pydatetime(), "bar_index": gpos, "symbol": symbol}
         sig = runner.on_bar(bar, hist)
         if sig is not None and gpos >= real_start:
+            try:
+                _sess = _sessf.check(ts.to_pydatetime()).session.value
+            except Exception:
+                _sess = "unknown"
             out.append({"setup_id": sig.setup_id, "direction": sig.direction,
                         "entry": sig.entry, "sl": sig.sl, "tp1": sig.tp1,
                         "tp2": sig.tp2 if sig.tp2 is not None else sig.tp1,
                         "grade": sig.grade, "gpos": gpos, "ts": ts.isoformat(),
-                        "sweep_src": getattr(sig, "sweep_src", None)})
+                        "sweep_src": getattr(sig, "sweep_src", None),
+                        "session": _sess})
     os.makedirs(out_dir, exist_ok=True)
     with open(ckpt, "w") as f:
         json.dump(out, f)
@@ -436,6 +450,27 @@ def _report(by, exec_df, range_start, n, exec_tf, variants, span, months, args):
         srcs = Counter(str(sg.get("sweep_src")) for sg in by[v] if sg.get("sweep_src"))
         if srcs:
             print(f"  [{v}] swept: " + " | ".join(f"{k}:{n}" for k, n in srcs.most_common()))
+        # PER-SESSION breakdown of FILLED trades (Asia/London/NY/overlap) — answers
+        # "does gold make money in every session or only one?". Join trades→signals
+        # on setup_id to attach the entry session, then aggregate R per session.
+        sess_of = {sg["setup_id"]: sg.get("session", "unknown") for sg in by[v]}
+        trades = _run_trades(by[v], exec_df, range_start, exec_tf, VARIANTS[v])
+        by_sess: dict = {}
+        for t in trades:
+            k = sess_of.get(t.get("setup_id"), "unknown")
+            b = by_sess.setdefault(k, {"n": 0, "w": 0, "r": 0.0})
+            b["n"] += 1
+            b["r"] += float(t.get("r_multiple", 0.0))
+            if float(t.get("r_multiple", 0.0)) > 0:
+                b["w"] += 1
+        if by_sess:
+            order = ["asia_range", "london_kill_zone", "overlap", "ny_kill_zone", "off_session", "unknown"]
+            parts = []
+            for k in sorted(by_sess, key=lambda x: order.index(x) if x in order else 99):
+                b = by_sess[k]
+                parts.append(f"{k.replace('_kill_zone','').replace('_range','')}:"
+                             f"{b['n']}@{b['w']/b['n']*100:.0f}%/{b['r']:+.1f}R")
+            print(f"  [{v}] session: " + " | ".join(parts))
         if args.bootstrap:
             ci = bootstrap_ci(rv)
             c = ci["ci"]
