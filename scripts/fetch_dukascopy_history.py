@@ -88,6 +88,19 @@ def _fetch_hour(inst: str, dt: datetime, cache_dir: Path | None) -> bytes | None
     return None
 
 
+def _reachable(inst: str) -> bool:
+    """Preflight: can this host reach Dukascopy at all? A KNOWN-good past weekday
+    hour must return SOME http response (200 with data, or 404). A connection
+    error means the datafeed is blocked (datacenter-IP block) — fail fast with a
+    clear message instead of grinding 'giving up' hour-by-hour for years."""
+    probe = datetime(2024, 6, 5, 13, tzinfo=timezone.utc)   # Wed, liquid gold hour
+    try:
+        r = requests.get(_hour_url(inst, probe), headers=_HEADERS, timeout=30)
+        return r.status_code in (200, 404)
+    except Exception:
+        return False
+
+
 def _parse_hour(raw: bytes, hour_start: datetime, divisor: float) -> list[tuple]:
     """Decompress one .bi5 and yield (ts, mid, spread, volume) per tick."""
     try:
@@ -137,6 +150,8 @@ def main() -> None:
                    help="Integer→price divisor (XAUUSD=1000; sanity-check the first bar).")
     p.add_argument("--spread-out", default=None,
                    help="Write an hour-of-day mean/median spread CSV here (empirical cost model).")
+    p.add_argument("--no-preflight", action="store_true",
+                   help="Skip the reachability probe (force the run even if the probe fails).")
     a = p.parse_args()
 
     store_symbol = a.store_symbol or a.symbol
@@ -146,6 +161,17 @@ def main() -> None:
     start = datetime.fromisoformat(a.start).replace(tzinfo=timezone.utc)
     end = datetime.fromisoformat(a.end).replace(tzinfo=timezone.utc)
     cache_dir = Path(a.cache_dir) if a.cache_dir else None
+
+    if not a.no_preflight and not _reachable(a.symbol):
+        sys.exit(
+            "🔴 Dukascopy datafeed is UNREACHABLE from this host — a probe of a known-good\n"
+            "   past weekday hour got no HTTP response. This is almost always a datacenter-IP\n"
+            "   block (RunPod/AWS/GCP are commonly blocked). Options:\n"
+            "     • Fetch on a RESIDENTIAL connection (e.g. your own laptop) then copy the\n"
+            "       SQLite DB to the pod, or\n"
+            "     • Use Twelve Data instead: GOLD_DATA=twelvedata in run_runpod_backtest.sh,\n"
+            "       or scripts/fetch_twelvedata_history.py (needs TWELVE_DATA_API_KEY).\n"
+            "   (Re-run with --no-preflight to force past this check.)")
 
     db = get_db(a.db_path)
     logger = SystemLogger(db)
