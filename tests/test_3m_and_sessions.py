@@ -15,6 +15,7 @@ import pytest
 
 from core.utils.visibility import TF_MINUTES, visible_window
 from core.data.twelvedata_fetcher import _TF_MAP, _TF_MINUTES as TD_MIN
+from core.data.resampler import SUPPORTED_TIMEFRAMES as RS_TF
 from core.engine.sequence_runner import SequenceRunner
 
 _SPEC = importlib.util.spec_from_file_location(
@@ -27,10 +28,12 @@ _SPEC.loader.exec_module(duka)
 class TestThreeMinuteMaps:
     def test_present_everywhere(self):
         assert TF_MINUTES["3m"] == 3
-        assert _TF_MAP["3m"] == "3min"
-        assert TD_MIN["3m"] == 3
-        assert duka._TF_RULE["3m"] == "3min"
+        assert TD_MIN["3m"] == 3                 # close-time cut knows 3m
+        assert duka._TF_RULE["3m"] == "3min"     # dukascopy resamples ticks to 3m
         assert duka._TF_MIN["3m"] == 3
+        assert RS_TF["3m"] == "3min"             # 1m->3m resampler path
+        # Twelve Data has NO 3min interval -> 3m must NOT be in its fetch map
+        assert "3m" not in _TF_MAP
 
     def test_htf_visibility_excludes_forming_bar_at_3m_exec(self):
         df1h = pd.DataFrame({"open": range(20), "high": range(20), "low": range(20),

@@ -183,11 +183,11 @@ class TestResamplerValidation:
     def test_unsupported_timeframe_raises(self):
         df = _make_1m(periods=10)
         with pytest.raises(ValueError, match="Unsupported target timeframe"):
-            Resampler().resample_one(df, "3m")
+            Resampler().resample_one(df, "7m")  # 7m is genuinely unsupported
 
     def test_unsupported_base_timeframe_raises(self):
         with pytest.raises(ValueError, match="Unsupported base timeframe"):
-            Resampler(base_timeframe="3m")
+            Resampler(base_timeframe="7m")  # 7m is genuinely unsupported
 
     def test_non_datetime_index_raises(self):
         df = pd.DataFrame(

@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Keys match the strings used everywhere in the system.
 SUPPORTED_TIMEFRAMES: Dict[str, str] = {
     "1m":  "1min",
+    "3m":  "3min",
     "5m":  "5min",
     "15m": "15min",
     "1h":  "1h",

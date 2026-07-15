@@ -37,7 +37,7 @@ STORE_SYMBOL = "XAUUSD"   # internal name we store under
 SOURCE = "twelvedata"
 
 # approx seconds per candle — used to size each pagination window (~5000 bars/call)
-_TF_SECONDS = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400}
+_TF_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400}
 _VALID_TFS = list(_TF_SECONDS.keys())
 _PER_CALL = 4500            # stay safely under the 5000-point cap
 _RATE_SLEEP = 8.0          # seconds between calls (free tier: 8 req/min)

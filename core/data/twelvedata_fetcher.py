@@ -23,7 +23,8 @@ from core.data.data_fetcher import DataFetcher, FetchResult, FetcherStatus
 # our timeframe -> Twelve Data interval string
 _TF_MAP = {
     "1m": "1min",
-    "3m": "3min",
+    # NOTE: Twelve Data has NO 3min interval — get 3m by fetching 1min and
+    # resampling (scripts/resample_candles.py). Do not add "3m" here.
     "5m": "5min",
     "15m": "15min",
     "1h": "1h",
